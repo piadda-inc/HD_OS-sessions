@@ -1,0 +1,61 @@
+{
+  "trigger_phrases": {
+    "implementation_mode": [
+      "yert"
+    ],
+    "discussion_mode": [
+      "stopert"
+    ],
+    "task_creation": [
+      "mek:"
+    ],
+    "task_startup": [
+      "start^"
+    ],
+    "task_completion": [
+      "finito"
+    ],
+    "context_compaction": [
+      "squish"
+    ]
+  },
+  "blocked_actions": {
+    "implementation_only_tools": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit"
+    ],
+    "bash_read_patterns": [
+      "backlog",
+      "python3",
+      "from codex_delegate import reply",
+      "reply("
+    ],
+    "bash_write_patterns": [],
+    "extrasafe": false
+  },
+  "git_preferences": {
+    "add_pattern": "all",
+    "default_branch": "main",
+    "commit_style": "conventional",
+    "auto_merge": false,
+    "auto_push": true,
+    "has_submodules": true
+  },
+  "environment": {
+    "os": "linux",
+    "shell": "bash",
+    "developer_name": "developer"
+  },
+  "features": {
+    "branch_enforcement": true,
+    "task_detection": true,
+    "auto_ultrathink": false,
+    "icon_style": "ascii",
+    "context_warnings": {
+      "warn_85": true,
+      "warn_90": true
+    }
+  }
+}

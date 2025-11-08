@@ -1,0 +1,343 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sessions.cc/schemas/git-save.json",
+  "title": "git-save Command Schema",
+  "description": "JSON schema for git-save command input/output contracts",
+
+  "definitions": {
+    "GateResult": {
+      "type": "object",
+      "required": ["name", "status", "message"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z_]+$",
+          "description": "Gate name (snake_case). Known gates: task_exists, daic_mode, protected_branch, merge_conflicts, submodule_consistency, has_changes, staged_changes, tests_required, allowlist, blocklist. Schema allows future gates without breaking validation."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pass", "fail", "skip"]
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable explanation of gate result"
+        },
+        "details": {
+          "type": "object",
+          "description": "Additional structured data about the gate result"
+        }
+      }
+    },
+
+    "FileChange": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Relative path from repository root"
+        },
+        "additions": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of lines added"
+        },
+        "deletions": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of lines deleted"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["added", "modified", "deleted", "renamed"],
+          "description": "Type of change"
+        }
+      }
+    },
+
+    "CommitInfo": {
+      "type": "object",
+      "required": ["hash", "message", "author", "timestamp"],
+      "properties": {
+        "hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$",
+          "description": "Git commit SHA (short or full)"
+        },
+        "message": {
+          "type": "string",
+          "description": "Full commit message"
+        },
+        "author": {
+          "type": "string",
+          "description": "Author name and email"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp"
+        },
+        "files_changed": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/FileChange"}
+        },
+        "stats": {
+          "type": "object",
+          "properties": {
+            "files": {"type": "integer", "minimum": 0},
+            "additions": {"type": "integer", "minimum": 0},
+            "deletions": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
+
+    "PushInfo": {
+      "type": "object",
+      "required": ["attempted", "success"],
+      "properties": {
+        "attempted": {
+          "type": "boolean",
+          "description": "Whether push was attempted"
+        },
+        "success": {
+          "type": "boolean",
+          "description": "Whether push succeeded (only meaningful if attempted=true)"
+        },
+        "remote": {
+          "type": "string",
+          "description": "Remote name (e.g., origin)"
+        },
+        "branch": {
+          "type": "string",
+          "description": "Branch name that was pushed"
+        },
+        "error": {
+          "type": "string",
+          "description": "Error message if push failed"
+        }
+      }
+    },
+
+    "DryRunPreview": {
+      "type": "object",
+      "required": ["would_commit", "commit_message"],
+      "properties": {
+        "would_commit": {
+          "type": "boolean",
+          "description": "Whether commit would be created"
+        },
+        "commit_message": {
+          "type": "string",
+          "description": "Message that would be used"
+        },
+        "files_to_stage": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Files that would be staged"
+        },
+        "would_push": {
+          "type": "boolean",
+          "description": "Whether push would be attempted"
+        },
+        "target_remote": {
+          "type": "string"
+        },
+        "target_branch": {
+          "type": "string"
+        }
+      }
+    },
+
+    "ErrorInfo": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "TASK_NOT_FOUND",
+            "TASK_INVALID",
+            "PROTECTED_BRANCH",
+            "MERGE_CONFLICTS",
+            "SUBMODULE_OUT_OF_SYNC",
+            "NO_CHANGES",
+            "STAGED_CHANGES_EXIST",
+            "GIT_ERROR",
+            "CONFIG_ERROR",
+            "ALLOWLIST_VIOLATION",
+            "BLOCKLIST_VIOLATION",
+            "TESTS_FAILED",
+            "INVALID_DAIC_MODE",
+            "PUSH_REJECTED",
+            "DRY_RUN_REQUIRED"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable error message"
+        },
+        "details": {
+          "type": "object",
+          "description": "Structured details about the error"
+        }
+      }
+    }
+  },
+
+  "oneOf": [
+    {
+      "title": "Context Input Schema",
+      "type": "object",
+      "properties": {
+        "daic_mode": {
+          "type": "string",
+          "enum": ["Discussion", "Implementation", "Check"],
+          "description": "Current DAIC mode (overrides detection)"
+        },
+        "tests_passed": {
+          "type": "boolean",
+          "description": "Whether tests passed (for test gate)"
+        },
+        "test_output_file": {
+          "type": "string",
+          "description": "Path to test results JSON file"
+        },
+        "force_commit": {
+          "type": "boolean",
+          "default": false,
+          "description": "Skip confirmations and force commit"
+        },
+        "commit_message_override": {
+          "type": ["string", "null"],
+          "description": "Override auto-generated commit message"
+        }
+      }
+    },
+
+    {
+      "title": "Success Response Schema",
+      "type": "object",
+      "required": ["success", "task_id", "action", "gates", "dry_run"],
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "task_id": {
+          "type": "string",
+          "pattern": "^task-[0-9]+$"
+        },
+        "task_title": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["committed", "skipped", "dry_run"]
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason for skip (only when action=skipped)"
+        },
+        "commit": {
+          "$ref": "#/definitions/CommitInfo",
+          "description": "Commit details (only when action=committed)"
+        },
+        "push": {
+          "$ref": "#/definitions/PushInfo",
+          "description": "Push details (only when action=committed)"
+        },
+        "preview": {
+          "$ref": "#/definitions/DryRunPreview",
+          "description": "Preview of what would happen (only when action=dry_run)"
+        },
+        "gates": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/GateResult"}
+        },
+        "dry_run": {
+          "type": "boolean"
+        }
+      }
+    },
+
+    {
+      "title": "Error Response Schema",
+      "type": "object",
+      "required": ["success", "error"],
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": false
+        },
+        "error": {
+          "$ref": "#/definitions/ErrorInfo"
+        },
+        "gates": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/GateResult"},
+          "description": "Gate results up to the point of failure"
+        }
+      }
+    }
+  ],
+
+  "examples": [
+    {
+      "title": "Context Input Example",
+      "value": {
+        "daic_mode": "Implementation",
+        "tests_passed": true,
+        "force_commit": false
+      }
+    },
+    {
+      "title": "Success Response Example",
+      "value": {
+        "success": true,
+        "task_id": "task-055",
+        "task_title": "Finalize git-save CLI contract",
+        "action": "committed",
+        "commit": {
+          "hash": "abc123f",
+          "message": "feat(git-automation): complete task-055 - Finalize git-save CLI contract",
+          "author": "Adrian <adrian@example.com>",
+          "timestamp": "2025-11-07T17:30:00Z",
+          "files_changed": [
+            {"path": "sessions/docs/git-save-cli-spec.md", "additions": 150, "deletions": 0, "status": "added"}
+          ],
+          "stats": {"files": 1, "additions": 150, "deletions": 0}
+        },
+        "push": {
+          "attempted": true,
+          "success": true,
+          "remote": "origin",
+          "branch": "feature/git-automation"
+        },
+        "gates": [
+          {"name": "daic_mode", "status": "pass", "message": "DAIC mode is Implementation"},
+          {"name": "protected_branch", "status": "pass", "message": "Branch is not protected"},
+          {"name": "has_changes", "status": "pass", "message": "1 file has uncommitted changes"}
+        ],
+        "dry_run": false
+      }
+    },
+    {
+      "title": "Error Response Example",
+      "value": {
+        "success": false,
+        "error": {
+          "code": "PROTECTED_BRANCH",
+          "message": "Cannot commit to protected branch 'main'",
+          "details": {
+            "current_branch": "main",
+            "protected_branches": ["main", "master"]
+          }
+        },
+        "gates": [
+          {"name": "protected_branch", "status": "fail", "message": "Branch main is protected"}
+        ]
+      }
+    }
+  ]
+}

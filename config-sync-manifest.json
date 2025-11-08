@@ -1,0 +1,278 @@
+{
+  "version": "1.0.0",
+  "canonical_source": "/home/heliosuser/sessions",
+  "targets": {
+    "piadda-mvp": "/home/heliosuser/piadda-mvp/sessions",
+    "backlog-md-python": "/home/heliosuser/backlog-md-python/sessions"
+  },
+  "files": [
+    {
+      "path": "CLAUDE.sessions.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Main documentation for cc-sessions framework - collaboration philosophy, code philosophy, context-gathering agent, DAIC execution windows, and workflow protocols"
+    },
+    {
+      "path": "protocols/kickstart/01-agents-only.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Kickstart protocol 01: Agents-only workflow overview"
+    },
+    {
+      "path": "protocols/kickstart/01-discussion.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Kickstart protocol 01: Discussion mode introduction"
+    },
+    {
+      "path": "protocols/kickstart/02-implementation.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Kickstart protocol 02: Implementation mode introduction"
+    },
+    {
+      "path": "protocols/kickstart/03-tasks-overview.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Kickstart protocol 03: Tasks system overview"
+    },
+    {
+      "path": "protocols/kickstart/04-task-creation.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Kickstart protocol 04: Task creation workflow"
+    },
+    {
+      "path": "protocols/kickstart/05-task-startup.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Kickstart protocol 05: Task startup workflow"
+    },
+    {
+      "path": "protocols/kickstart/06-task-completion.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Kickstart protocol 06: Task completion workflow"
+    },
+    {
+      "path": "protocols/kickstart/07-compaction.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Kickstart protocol 07: Context compaction workflow"
+    },
+    {
+      "path": "protocols/kickstart/08-agents.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Kickstart protocol 08: Subagents and delegation"
+    },
+    {
+      "path": "protocols/kickstart/09-api.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Kickstart protocol 09: Sessions API reference"
+    },
+    {
+      "path": "protocols/kickstart/10-advanced.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Kickstart protocol 10: Advanced features and patterns"
+    },
+    {
+      "path": "protocols/kickstart/11-graduation.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Kickstart protocol 11: Graduation from kickstart mode"
+    },
+    {
+      "path": "protocols/context-compaction/context-compaction.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Context compaction protocol - reduces conversation transcript size when approaching token limits"
+    },
+    {
+      "path": "protocols/task-creation/task-creation.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task creation protocol - defines workflow for creating new task files"
+    },
+    {
+      "path": "protocols/task-startup/task-startup.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task startup protocol - standard task initialization workflow"
+    },
+    {
+      "path": "protocols/task-startup/directory-task-startup.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task startup protocol - directory-specific task initialization"
+    },
+    {
+      "path": "protocols/task-startup/subtask-startup.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task startup protocol - subtask initialization workflow"
+    },
+    {
+      "path": "protocols/task-startup/resume-notes-standard.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task startup protocol - resume notes for standard repositories"
+    },
+    {
+      "path": "protocols/task-startup/resume-notes-superrepo.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task startup protocol - resume notes for superrepo/submodule repositories"
+    },
+    {
+      "path": "protocols/task-startup/submodule-management.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task startup protocol - Git submodule management workflow"
+    },
+    {
+      "path": "protocols/task-completion/task-completion.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task completion protocol - standard task completion workflow"
+    },
+    {
+      "path": "protocols/task-completion/directory-task-completion.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task completion protocol - directory-specific task completion"
+    },
+    {
+      "path": "protocols/task-completion/subtask-completion.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task completion protocol - subtask completion workflow"
+    },
+    {
+      "path": "protocols/task-completion/commit-standard.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task completion protocol - standard repository commit workflow"
+    },
+    {
+      "path": "protocols/task-completion/commit-superrepo.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task completion protocol - superrepo/submodule commit workflow"
+    },
+    {
+      "path": "protocols/task-completion/commit-style-conventional.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task completion protocol - conventional commit message style"
+    },
+    {
+      "path": "protocols/task-completion/commit-style-detailed.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task completion protocol - detailed commit message style"
+    },
+    {
+      "path": "protocols/task-completion/commit-style-simple.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task completion protocol - simple commit message style"
+    },
+    {
+      "path": "protocols/task-completion/staging-all.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task completion protocol - Git staging strategy: add all changes"
+    },
+    {
+      "path": "protocols/task-completion/staging-ask.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task completion protocol - Git staging strategy: ask user before staging"
+    },
+    {
+      "path": "protocols/task-completion/git-add-warning.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task completion protocol - Warnings about sensitive file patterns when staging"
+    },
+    {
+      "path": "knowledge/claude-code/hooks-reference.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Knowledge base - Sessions API hooks reference documentation"
+    },
+    {
+      "path": "knowledge/claude-code/project-directory-references.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Knowledge base - Project directory structure reference"
+    },
+    {
+      "path": "knowledge/claude-code/slash-commands.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Knowledge base - Sessions slash commands reference"
+    },
+    {
+      "path": "knowledge/claude-code/subagents.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Knowledge base - Subagent delegation patterns and best practices"
+    },
+    {
+      "path": "knowledge/claude-code/tool-permissions.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Knowledge base - Tool permissions and security model"
+    },
+    {
+      "path": "tasks/TEMPLATE.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task template - Standard structure for new task files"
+    },
+    {
+      "path": "tasks/h-kickstart-setup.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task template - Kickstart setup task for onboarding new repositories"
+    },
+    {
+      "path": "tasks/indexes/INDEX_TEMPLATE.md",
+      "type": "exact",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Task index template - Standard structure for task index files"
+    },
+    {
+      "path": "package.json",
+      "type": "allow-different",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "NPM package configuration - May have project-specific dependencies",
+      "reason": "Projects may add custom dependencies or scripts for their specific needs"
+    },
+    {
+      "path": "sessions-config.json",
+      "type": "allow-different",
+      "targets": ["piadda-mvp", "backlog-md-python"],
+      "description": "Sessions framework configuration - Intentionally differs by project needs",
+      "reason": "Project-specific settings: git preferences (auto_push, auto_merge, has_submodules), trigger phrases (discussion_mode), feature flags (auto_ultrathink, icon_style, backlog_windows), bash restrictions (bash_read_patterns)"
+    }
+  ],
+  "exclude_patterns": [
+    "sessions-state.json",
+    "transcripts/**",
+    "tasks/done/**",
+    "tasks/indexes/*.md",
+    "tasks/[a-z]-*.md",
+    ".git/**",
+    "node_modules/**"
+  ],
+  "notes": {
+    "current_status": "As of 2025-11-06: backlog-md-python missing 13 kickstart protocol files and h-kickstart-setup.md task. Piadda-mvp and backlog-md-python using older DAIC Mode System instead of modern DAIC Execution Windows approach.",
+    "sync_strategy": "Canonical source is /home/heliosuser/sessions/. All 'exact' files must match byte-for-byte via MD5 checksum. 'allow-different' files document intentional divergences and should not be overwritten during sync.",
+    "verification": "Use MD5 checksums to verify exact matches. All common protocol, knowledge, and task files currently show 100% identity where they exist in all three repos."
+  }
+}
