@@ -11,7 +11,7 @@ Alright, let's talk about what just happened when you used that task creation tr
 
 Behind the scenes:
 
-**1. The trigger phrase put me into implementation mode**
+**1. The trigger phrase put me into orchestration mode**
 You didn't have to say "go ahead" - the trigger itself is the approval.
 
 **2. It used your config to customize the task creation protocol I follow**

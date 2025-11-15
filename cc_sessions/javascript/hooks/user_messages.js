@@ -83,7 +83,7 @@ function phraseMatches(phrase, text) {
     return text.toLowerCase().includes(phrase.toLowerCase());
 }
 
-const implementationPhraseDetected = CONFIG.trigger_phrases.implementation_mode.some(
+const implementationPhraseDetected = CONFIG.trigger_phrases.orchestration_mode.some(
     phrase => phraseMatches(phrase, prompt)
 );
 const discussionPhraseDetected = CONFIG.trigger_phrases.discussion_mode.some(
@@ -231,15 +231,16 @@ if (!isApiCommand && STATE.mode === Mode.NO && implementationPhraseDetected) {
     editState(s => {
         s.mode = Mode.GO;
     });
-    context += `[DAIC: Implementation Mode Activated]
+    context += `[DAIC: Orchestration Mode Activated]
 CRITICAL RULES:
 - Convert your proposed todos to TodoWrite EXACTLY as written
-- Do NOT add new todos - only implement approved items
+- Do NOT add new todos - only coordinate approved items
 - Do NOT remove todos - complete them or return to discussion
 - Check off each todo as you complete it
 - If you discover you need to change your approach, return to discussion mode using the API command
-- Todo list defines your execution boundary
+- Todo list defines your coordination boundary
 - When all todos are complete, you'll auto-return to discussion
+- Your role is to ORCHESTRATE and DELEGATE work, not execute directly
 `;
 }
 
@@ -585,8 +586,8 @@ if (!isApiCommand && taskStartDetected) {
         git_status_scope: gitStatusScope,
         git_handling: gitHandling,
         todos: formatTodosForProtocol(todos),
-        implementation_mode_triggers: CONFIG.trigger_phrases.implementation_mode.length > 0
-            ? `[${CONFIG.trigger_phrases.implementation_mode.join(', ')}]`
+        orchestration_mode_triggers: CONFIG.trigger_phrases.orchestration_mode.length > 0
+            ? `[${CONFIG.trigger_phrases.orchestration_mode.join(', ')}]`
             : "[]"
     };
 

@@ -70,7 +70,7 @@ def phrase_matches(phrase, text):
     else:
         return phrase.lower() in text.lower()
 
-implementation_phrase_detected = any(phrase_matches(phrase, prompt) for phrase in CONFIG.trigger_phrases.implementation_mode)
+implementation_phrase_detected = any(phrase_matches(phrase, prompt) for phrase in CONFIG.trigger_phrases.orchestration_mode)
 discussion_phrase_detected = any(phrase_matches(phrase, prompt) for phrase in CONFIG.trigger_phrases.discussion_mode)
 task_creation_detected = any(phrase_matches(phrase, prompt) for phrase in CONFIG.trigger_phrases.task_creation)
 task_completion_detected = any(phrase_matches(phrase, prompt) for phrase in CONFIG.trigger_phrases.task_completion)
@@ -179,15 +179,16 @@ if transcript_path and os.path.exists(transcript_path):
 # Implementation triggers (only work in discussion mode, skip for /add-trigger)
 if not is_api_command and STATE.mode is Mode.NO and implementation_phrase_detected:
     with edit_state() as s: s.mode = Mode.GO; STATE = s
-    context += """[DAIC: Implementation Mode Activated]
+    context += """[DAIC: Orchestration Mode Activated]
 CRITICAL RULES:
 - Convert your proposed todos to TodoWrite EXACTLY as written
-- Do NOT add new todos - only implement approved items
+- Do NOT add new todos - only coordinate approved items
 - Do NOT remove todos - complete them or return to discussion
 - Check off each todo as you complete it
 - If you discover you need to change your approach, return to discussion mode using the API command
-- Todo list defines your execution boundary
+- Todo list defines your coordination boundary
 - When all todos are complete, you'll auto-return to discussion
+- Your role is to ORCHESTRATE and DELEGATE work, not execute directly
 """
 
 # Emergency stop (works in any mode)
@@ -460,7 +461,7 @@ if not is_api_command and task_start_detected:
         'git_status_scope': git_status_scope,
         'git_handling': git_handling,
         'todos': format_todos_for_protocol(todos),
-        'implementation_mode_triggers': f"[{', '.join(phrase for phrase in CONFIG.trigger_phrases.implementation_mode)}]" if CONFIG.trigger_phrases.implementation_mode else "[]"
+        'orchestration_mode_triggers': f"[{', '.join(phrase for phrase in CONFIG.trigger_phrases.orchestration_mode)}]" if CONFIG.trigger_phrases.orchestration_mode else "[]"
     }
 
     # Format protocol with template variables

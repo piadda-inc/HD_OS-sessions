@@ -45,14 +45,14 @@ The agent operates in its own context window and can read extensively without af
 
 ## DAIC Mode System
 
-This repository uses Discussion-Alignment-Implementation-Check (DAIC):
+This repository uses Discussion-Alignment-Orchestration-Check (DAOC):
 
 - **Discussion Mode** (default): Edit/Write/MultiEdit tools are blocked. Focus on discussing approach.
-- **Implementation Mode**: Tools are available. Execute approved todos only.
+- **Orchestration Mode**: Tools are available. Coordinate agents and delegate work.
 
-**Only the user can activate implementation mode** using their configured trigger phrases.
+**Only the user can activate orchestration mode** using their configured trigger phrases.
 
-When implementation is complete, return to discussion mode:
+When orchestration is complete, return to discussion mode:
 ```bash
 sessions mode discussion
 ```

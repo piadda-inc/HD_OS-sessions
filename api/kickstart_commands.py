@@ -45,7 +45,7 @@ def format_config_for_display(config) -> str:
     return f"""**Current Configuration:**
 
 **Trigger Phrases:**
-- Implementation mode: {config.trigger_phrases.implementation_mode}
+- Orchestration mode: {config.trigger_phrases.orchestration_mode}
 - Discussion mode: {config.trigger_phrases.discussion_mode}
 - Task creation: {config.trigger_phrases.task_creation}
 - Task startup: {config.trigger_phrases.task_startup}
@@ -210,7 +210,7 @@ def begin_kickstart(mode: str, json_output: bool = False) -> Any:
 
 def complete_kickstart(json_output: bool = False) -> Any:
     """Exit kickstart mode and clean up kickstart files/settings programmatically."""
-    # Switch to implementation mode if in discussion mode
+    # Switch to orchestration mode if in discussion mode
     if STATE.mode == Mode.NO:
         with edit_state() as s:
             s.mode = Mode.GO

@@ -127,13 +127,13 @@ def format_state_help() -> str:
         "Mode Aliases:",
         "  no   → discussion mode",
         "  off  → bypass mode toggle",
-        "  go   → implementation mode (use trigger phrases, not slash commands)",
+        "  go   → orchestration mode (use trigger phrases, not slash commands)",
         "",
         "Security Boundaries:",
         "  Mode switching:",
         "    • User can switch between modes freely via slash commands",
-        "    • API can only switch implementation → discussion (one-way safety)",
-        "    • Use trigger phrases for discussion → implementation transitions",
+        "    • API can only switch orchestration → discussion (one-way safety)",
+        "    • Use trigger phrases for discussion → orchestration transitions",
         "  Bypass mode:",
         "    • Deactivation: Available anytime (return to normal DAIC enforcement)",
         "    • Activation: Requires user-initiated slash command (safety mechanism)",
@@ -232,22 +232,25 @@ def handle_mode_command(args: List[str], json_output: bool = False, from_slash: 
     Usage:
         mode discussion / mode no   - Switch to discussion mode (one-way only)
         mode bypass / mode off      - Toggle bypass mode (disables behavioral constraints)
-        mode go                     - Switch to implementation mode (not allowed via API)
+        mode go                     - Switch to orchestration mode (not allowed via API)
     """
     if not args:
         # Just show current mode and bypass status
-        if json_output: return {"mode": STATE.mode.value, "bypass_mode": STATE.flags.bypass_mode}
-        result = f"Current mode: {STATE.mode.value}"
-        if STATE.flags.bypass_mode: result += "\nBypass mode: ACTIVE (behavioral constraints disabled)"
+        # Reload state to get fresh values
+        current_state = load_state()
+        if json_output: return {"mode": current_state.mode.value, "bypass_mode": current_state.flags.bypass_mode}
+        result = f"Current mode: {current_state.mode.value}"
+        if current_state.flags.bypass_mode: result += "\nBypass mode: ACTIVE (behavioral constraints disabled)"
         return result
 
     target_mode = args[0].lower()
 
     # Friendly name mapping
+    # 'orchestration' is canonical, 'implementation' is legacy alias
     mode_aliases = {
         'no': 'discussion',
-        'go': 'implementation',
-        'off': 'bypass'
+        'go': 'orchestration',        # Canonical alias
+        'implementation': 'orchestration'  # Backward compatibility
     }
 
     target_mode = mode_aliases.get(target_mode, target_mode)
@@ -285,26 +288,24 @@ def handle_mode_command(args: List[str], json_output: bool = False, from_slash: 
         if json_output: return {"bypass_mode": bypass_active, "message": result}
         return result
 
-    elif target_mode == 'implementation':
-        # Allow via slash command (user-initiated), block via direct API call (Claude-initiated)
-        if not from_slash:
-            raise ValueError("Cannot switch to implementation mode via API. Use trigger phrases or slash command instead.")
-
-        # User-initiated via slash command - allow the switch
+    elif target_mode == 'orchestration':
+        # Allow user-initiated switches via CLI or slash command interface
         with edit_state() as s:
-            if s.mode == Mode.GO: result = "Already in implementation mode"
+            if s.mode == Mode.GO: result = "Already in orchestration mode"
             else:
                 s.mode = Mode.GO
-                
-                result = "Mode switched: discussion → implementation\n\nYou are now in Implementation Mode and may use tools to execute agreed upon actions.\n\nRemember to return to Discussion Mode when done:\n  /sessions state mode no\n  OR use your discussion mode trigger phrases"
 
-        if json_output: return {"mode": "implementation", "message": result}
+                result = "Mode switched: discussion → orchestration\n\nYou are now in Orchestration Mode and may coordinate and delegate agreed upon work.\n\nRemember to return to Discussion Mode when done:\n  /sessions state mode no\n  OR use your discussion mode trigger phrases"
+
+        # Reload state to get updated mode value
+        current_state = load_state()
+        if json_output: return {"mode": current_state.mode.value, "message": result}
         return result
 
     else:
-        valid_modes = "discussion (no), implementation (go), bypass (off)"
+        valid_modes = "orchestration (go, implementation), discussion (no), bypass (off)"
         if from_slash:
-            return f"Unknown mode: {args[0]}\n\nValid modes: {valid_modes}\n\nUsage:\n  mode discussion / mode no        - Switch to discussion mode\n  mode implementation / mode go    - Switch to implementation mode\n  mode bypass / mode off           - Toggle bypass mode"
+            return f"Unknown mode: {args[0]}\n\nValid modes: {valid_modes}\n\nUsage:\n  mode orchestration / mode go     - Switch to orchestration mode (alias: implementation)\n  mode discussion / mode no        - Switch to discussion mode\n  mode bypass / mode off           - Toggle bypass mode"
         raise ValueError(f"Unknown mode: {args[0]}. Valid modes: {valid_modes}")
 #!<
 

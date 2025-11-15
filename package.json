@@ -1,4 +1,7 @@
 {
   "name": "sessions-api",
-  "type": "commonjs"
+  "type": "commonjs",
+  "scripts": {
+    "test": "node run-tests.js"
+  }
 }

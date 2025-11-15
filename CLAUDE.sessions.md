@@ -45,14 +45,14 @@ The agent operates in its own context window and can read extensively without af
 
 ## DAIC Mode System
 
-This repository uses Discussion-Alignment-Implementation-Check (DAIC):
+This repository uses Discussion-Alignment-Orchestration-Check (DAOC):
 
 - **Discussion Mode** (default): Edit/Write/MultiEdit tools are blocked. Focus on discussing approach.
-- **Implementation Mode**: Tools are available. Execute approved todos only.
+- **Orchestration Mode**: Tools are available. Coordinate agents and delegate work.
 
-**Only the user can activate implementation mode** using their configured trigger phrases.
+**Only the user can activate orchestration mode** using their configured trigger phrases.
 
-When implementation is complete, return to discussion mode:
+When orchestration is complete, return to discussion mode:
 ```bash
 sessions mode discussion
 ```
@@ -60,3 +60,17 @@ sessions mode discussion
 ## Workflow Protocols
 
 The system has automated protocols for task creation, startup, completion, and context compaction. When loaded, follow the protocol instructions. The user activates these with trigger phrases - you don't need to manage this.
+
+## Graphiti Memory Integration
+
+Memory is optional but, when enabled, you will see a `## 📚 Relevant Memory` block injected by `SessionStart`. Use it to:
+- Call out applicable `fact` entries or `episode_name` references when proposing todos and implementation plans.
+- Challenge outdated facts when you discover new information; mention whether you'll overwrite memory at the end of the task.
+
+When no memory block appears, assume the Graphiti adapter is disabled or graphiti_local is offline (hooks fall back to a no-op adapter). Continue without special handling, but feel free to note that `bin/install-memory.sh` can provision the stack if the user asks for it.
+
+During completion protocols:
+- `PostToolUse` may auto-store an episode whenever todos finish and `sessions-config.json` sets `memory.auto_store` to `task-completion` (or `both`). Provide a concise summary of what changed and keep todos accurate—both are used to populate the episode payload.
+- If the completion template includes `protocols/task-completion/memory-prompt.md`, follow it exactly (usually a short reflection plus file list). That content becomes the episode body for `graphiti_local`.
+
+Manual memory calls follow the templates in `protocols/task-startup/memory-search.md` and `protocols/task-completion/memory-prompt.md`. Use them only when requested so you don't spend unnecessary context on memory management.

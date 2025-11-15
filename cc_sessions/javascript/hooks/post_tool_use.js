@@ -14,6 +14,7 @@ const { execSync } = require('child_process');
 /// ===== LOCAL ===== ///
 const {
     loadState,
+    loadConfig,
     editState,
     Mode,
     PROJECT_ROOT,
@@ -22,6 +23,7 @@ const {
     TaskState,
     StateError
 } = require('./shared_state.js');
+const { getClient } = require('../lib/memory');
 ///-///
 
 //-//
@@ -62,6 +64,42 @@ const cwd = inputData.cwd || "";
 let mod = false;
 
 const STATE = loadState();
+const CONFIG = loadConfig();
+const MEMORY_CLIENT = getClient(CONFIG.memory);
+
+function autoStoreEnabled(event) {
+    const value = (CONFIG.memory?.auto_store || 'off').toLowerCase();
+    if (value === 'off') return false;
+    if (value === 'both') return true;
+    return value === event;
+}
+
+function buildEpisodePayload(toolInput) {
+    const summary = toolInput.summary || `Completed task: ${STATE.current_task.name || STATE.current_task.file || 'session task'}`;
+    const objectives = Array.isArray(toolInput.objectives)
+        ? toolInput.objectives
+        : (STATE.todos.active || []).map(t => t.content);
+    return {
+        episode_id: toolInput.episode_id || `${STATE.current_task.file || 'task'}-${Math.random().toString(36).slice(2, 10)}`,
+        workspace_id: CONFIG.memory?.group_id || 'hd_os_workspace',
+        task_id: STATE.current_task.file || STATE.current_task.name || `task-${Math.random().toString(36).slice(2, 8)}`,
+        summary,
+        objectives,
+        timestamps: { completed_at: toolInput.completed_at || new Date().toISOString() }
+    };
+}
+
+function maybeStoreTaskCompletion(toolInput) {
+    if (!CONFIG.memory?.enabled || !autoStoreEnabled('task-completion') || !MEMORY_CLIENT.canStore) {
+        return false;
+    }
+    try {
+        MEMORY_CLIENT.storeEpisode(buildEpisodePayload(toolInput));
+        return true;
+    } catch {
+        return false;
+    }
+}
 //-//
 
 /*
@@ -76,7 +114,7 @@ const STATE = loadState();
 Handles post-tool execution cleanup and state management:
 - Cleans up subagent context flags and transcript directories after Task tool completion
 - Auto-returns to discussion mode when all todos are marked complete
-- Enforces todo-based execution boundaries in implementation mode
+- Enforces todo-based execution boundaries in orchestration mode
 - Provides directory navigation feedback after cd commands
 */
 
@@ -117,6 +155,7 @@ if (STATE.mode === Mode.GO && toolName === "TodoWrite" && STATE.todos.allComplet
     console.error("[DAIC: Todos Complete] All todos completed.\n\n");
 
     if (STATE.active_protocol === SessionsProtocol.COMPLETE) {
+        maybeStoreTaskCompletion(toolInput);
         editState(s => {
             s.mode = Mode.NO;
             s.active_protocol = null;
@@ -163,8 +202,8 @@ if (STATE.mode === Mode.GO && toolName === "TodoWrite" && STATE.todos.allComplet
 
 //!> Implementation mode + no Todos enforcement
 if (STATE.mode === Mode.GO && !STATE.flags.subagent && (!STATE.todos.active || STATE.todos.active.length === 0) && STATE.current_task.name) {
-    // In implementation mode but no todos - show reminder only during task-based work
-    console.error("[Reminder] You're in implementation mode without approved todos. " +
+    // In orchestration mode but no todos - show reminder only during task-based work
+    console.error("[Reminder] You're in orchestration mode without approved todos. " +
         "If you proposed todos that were approved, add them. " +
         "If the user asked you to do something without todo proposal/approval that is **reasonably complex or multi-step**, translate *only the remaining work* to todos and add them (all 'pending'). ");
     mod = true;

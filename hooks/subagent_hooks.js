@@ -16,7 +16,8 @@ const { editState, loadState, PROJECT_ROOT } = require('./shared_state.js');
 const {
     ensureTranscriptInfrastructure,
     resolveTranscriptTarget,
-    withTranscriptLock
+    withTranscriptLock,
+    readTranscriptTail
 } = require('./transcript_utils.js');
 ///-///
 
@@ -38,8 +39,9 @@ function findCurrentTranscript(transcriptPath, sessionId, staleThreshold = 30) {
     }
 
     try {
-        // Read last line of transcript to get last message timestamp
-        const lines = fs.readFileSync(transcriptPath, 'utf-8').split('\n').filter(line => line.trim());
+        // Read a bounded tail of the transcript to get recent entries
+        const tailContent = readTranscriptTail(transcriptPath, 131072);
+        const lines = tailContent.split('\n').filter(line => line.trim());
         if (!lines.length) {
             return transcriptPath;
         }
@@ -73,7 +75,8 @@ function findCurrentTranscript(transcriptPath, sessionId, staleThreshold = 30) {
         // Check each transcript for matching session ID
         for (const candidate of allFiles) {
             try {
-                const candidateLines = fs.readFileSync(candidate, 'utf-8').split('\n').filter(line => line.trim());
+                const candidateTail = readTranscriptTail(candidate, 131072);
+                const candidateLines = candidateTail.split('\n').filter(line => line.trim());
                 if (!candidateLines.length) {
                     continue;
                 }
@@ -215,6 +218,20 @@ function handleSubagentStopEvent(inputData, toolName) {
      */
     if (toolName !== "Task") {
         return;
+    }
+
+    // Check if backlog integration is ready
+    try {
+        const state = loadState();
+        const backlogReady = state?.metadata?.orchestration?.backlog_ready;
+        if (backlogReady === false) {
+            console.error("[Orchestration] piadda-backlog not installed - orchestration disabled.");
+            console.error("[Orchestration] Run: python3 -m pip install \"piadda-backlog @ git+https://github.com/piadda-inc/piadda-backlog.git\"");
+            return;
+        }
+    } catch (error) {
+        // If we can't load state, proceed anyway (backward compatibility)
+        console.error(`[Orchestration] Warning: Could not check backlog_ready flag: ${error.message}`);
     }
 
     let transcriptPath = inputData.transcript_path || "";
@@ -370,7 +387,8 @@ if (transcriptPath) {
 // Get the transcript into memory
 let transcript = [];
 try {
-    const lines = fs.readFileSync(transcriptPath, 'utf-8').split('\n');
+    const content = readTranscriptTail(transcriptPath, 131072);
+    const lines = content.split('\n');
     for (const line of lines) {
         if (line.trim()) {
             transcript.push(JSON.parse(line));

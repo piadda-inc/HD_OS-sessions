@@ -141,10 +141,11 @@ def handle_phrases_command(args: List[str], json_output: bool = False, from_slas
     
     action = args[0].lower()
 
-    # Map friendly category names for slash commands
+    # Map friendly category names (supports both slash commands and direct API calls)
     def map_category(cat: str) -> str:
-        if not from_slash: return cat
-        mapping = { 'go': 'implementation_mode',
+        mapping = { 'go': 'orchestration_mode',
+                    'implementation': 'orchestration_mode',  # Backward compatibility alias
+                    'implementation_mode': 'orchestration_mode',  # Direct API alias
                     'no': 'discussion_mode',
                     'create': 'task_creation',
                     'start': 'task_startup',
@@ -171,7 +172,7 @@ def handle_phrases_command(args: List[str], json_output: bool = False, from_slas
         category = map_category(args[1])
 
         # Check for valid category
-        valid_categories = ['implementation_mode', 'discussion_mode', 'task_creation', 'task_startup', 'task_completion', 'context_compaction']
+        valid_categories = ['orchestration_mode', 'discussion_mode', 'task_creation', 'task_startup', 'task_completion', 'context_compaction']
         if category not in valid_categories:
             if from_slash:
                 return f"Invalid category '{args[1]}'\nValid categories: go, no, create, start, complete, compact\n\nUse '/sessions config trigger help' for more info"
@@ -200,7 +201,7 @@ def handle_phrases_command(args: List[str], json_output: bool = False, from_slas
         category = map_category(args[1])
 
         # Check for valid category
-        valid_categories = ['implementation_mode', 'discussion_mode', 'task_creation', 'task_startup', 'task_completion', 'context_compaction']
+        valid_categories = ['orchestration_mode', 'discussion_mode', 'task_creation', 'task_startup', 'task_completion', 'context_compaction']
         if category not in valid_categories:
             if from_slash:
                 return f"Invalid category '{args[1]}'\nValid categories: go, no, create, start, complete, compact\n\nUse '/sessions config trigger help' for more info"
@@ -250,12 +251,14 @@ def format_phrases_help() -> str:
                 "  /sessions config trigger add <category> <phrase>   - Add trigger phrase",
                 "  /sessions config trigger remove <category> <phrase> - Remove trigger phrase", "",
                 "Categories:",
-                "  go       - implementation_mode triggers (yert, make it so, run that)",
+                "  go       - orchestration_mode triggers (yert, make it so, run that)",
                 "  no       - discussion_mode triggers (stop, silence)",
                 "  create   - task_creation triggers (mek:, mekdis)",
                 "  start    - task_startup triggers (start^, begin task:)",
                 "  complete - task_completion triggers (finito)",
-                "  compact  - context_compaction triggers (lets compact, squish)"]
+                "  compact  - context_compaction triggers (lets compact, squish)", "",
+                "Legacy aliases:",
+                "  implementation_mode / implementation -> orchestration_mode (backward compatibility)"]
     return "\n".join(lines)
 
 def format_phrases_human(phrases: Dict[str, List[str]]) -> str:
@@ -969,8 +972,8 @@ def validate_config(json_output: bool = False) -> Any:
             issues.append("Developer name is empty")
         
         # Check for at least one implementation trigger phrase
-        if not config.trigger_phrases.implementation_mode:
-            issues.append("No implementation mode trigger phrases defined")
+        if not config.trigger_phrases.orchestration_mode:
+            issues.append("No orchestration mode trigger phrases defined")
         
         if issues:
             if json_output:

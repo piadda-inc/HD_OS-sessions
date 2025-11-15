@@ -163,13 +163,13 @@ function formatStateHelp() {
         "Mode Aliases:",
         "  no   → discussion mode",
         "  off  → bypass mode toggle",
-        "  go   → implementation mode (use trigger phrases, not slash commands)",
+        "  go   → orchestration mode (use trigger phrases, not slash commands)",
         "",
         "Security Boundaries:",
         "  Mode switching:",
         "    • User can switch between modes freely via slash commands",
-        "    • API can only switch implementation → discussion (one-way safety)",
-        "    • Use trigger phrases for discussion → implementation transitions",
+        "    • API can only switch orchestration → discussion (one-way safety)",
+        "    • Use trigger phrases for discussion → orchestration transitions",
         "  Bypass mode:",
         "    • Deactivation: Available anytime (return to normal DAIC enforcement)",
         "    • Activation: Requires user-initiated slash command (safety mechanism)",
@@ -299,15 +299,17 @@ function handleModeCommand(args, jsonOutput = false, fromSlash = false) {
      * Usage:
      *     mode discussion / mode no   - Switch to discussion mode (one-way only)
      *     mode bypass / mode off      - Toggle bypass mode (disables behavioral constraints)
-     *     mode go                     - Switch to implementation mode (not allowed via API)
+     *     mode go                     - Switch to orchestration mode (not allowed via API)
      */
     if (!args || args.length === 0) {
         // Just show current mode and bypass status
+        // Reload state to get fresh values
+        const currentState = loadState();
         if (jsonOutput) {
-            return { mode: STATE.mode.value || STATE.mode, bypass_mode: STATE.flags.bypass_mode };
+            return { mode: currentState.mode, bypass_mode: currentState.flags.bypass_mode };
         }
-        let result = `Current mode: ${STATE.mode.value || STATE.mode}`;
-        if (STATE.flags.bypass_mode) {
+        let result = `Current mode: ${currentState.mode}`;
+        if (currentState.flags.bypass_mode) {
             result += "\nBypass mode: ACTIVE (behavioral constraints disabled)";
         }
         return result;
@@ -316,10 +318,11 @@ function handleModeCommand(args, jsonOutput = false, fromSlash = false) {
     let targetMode = args[0].toLowerCase();
 
     // Friendly name mapping
+    // 'orchestration' is canonical, 'implementation' is legacy alias
     const modeAliases = {
         'no': 'discussion',
-        'go': 'implementation',
-        'off': 'bypass'
+        'go': 'orchestration',        // Canonical alias
+        'implementation': 'orchestration'  // Backward compatibility
     };
 
     targetMode = modeAliases[targetMode] || targetMode;
@@ -370,32 +373,34 @@ function handleModeCommand(args, jsonOutput = false, fromSlash = false) {
         }
         return result;
 
-    } else if (targetMode === 'implementation') {
+    } else if (targetMode === 'orchestration') {
         // Allow via slash command (user-initiated), block via direct API call (Claude-initiated)
         if (!fromSlash) {
-            throw new Error("Cannot switch to implementation mode via API. Use trigger phrases or slash command instead.");
+            throw new Error("Cannot switch to orchestration mode via API. Use trigger phrases or slash command instead.");
         }
 
         // User-initiated via slash command - allow the switch
         let result;
         editState(state => {
-            if (state.mode === Mode.GO || state.mode === 'implementation') {
-                result = "Already in implementation mode";
+            if (state.mode === Mode.GO || state.mode === 'orchestration') {
+                result = "Already in orchestration mode";
             } else {
                 state.mode = Mode.GO;
-                result = "Mode switched: discussion → implementation\n\nYou are now in Implementation Mode and may use tools to execute agreed upon actions.\n\nRemember to return to Discussion Mode when done:\n  /sessions state mode no\n  OR use your discussion mode trigger phrases";
+                result = "Mode switched: discussion → orchestration\n\nYou are now in Orchestration Mode and may coordinate and delegate agreed upon work.\n\nRemember to return to Discussion Mode when done:\n  /sessions state mode no\n  OR use your discussion mode trigger phrases";
             }
         });
 
+        // Reload state to get updated mode value
+        const currentState = loadState();
         if (jsonOutput) {
-            return { mode: "implementation", message: result };
+            return { mode: currentState.mode, message: result };
         }
         return result;
 
     } else {
-        const validModes = "discussion (no), implementation (go), bypass (off)";
+        const validModes = "orchestration (go, implementation), discussion (no), bypass (off)";
         if (fromSlash) {
-            return `Unknown mode: ${args[0]}\n\nValid modes: ${validModes}\n\nUsage:\n  mode discussion / mode no        - Switch to discussion mode\n  mode implementation / mode go    - Switch to implementation mode\n  mode bypass / mode off           - Toggle bypass mode`;
+            return `Unknown mode: ${args[0]}\n\nValid modes: ${validModes}\n\nUsage:\n  mode orchestration / mode go     - Switch to orchestration mode (alias: implementation)\n  mode discussion / mode no        - Switch to discussion mode\n  mode bypass / mode off           - Toggle bypass mode`;
         }
         throw new Error(`Unknown mode: ${args[0]}. Valid modes: ${validModes}`);
     }

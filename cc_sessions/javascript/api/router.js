@@ -17,6 +17,7 @@ const {
 const { handleConfigCommand } = require('./config_commands.js');
 const { handleProtocolCommand } = require('./protocol_commands.js');
 const { handleTaskCommand } = require('./task_commands.js');
+const { handleImplementationCommand: handleOrchestrationCommand } = require('./implementation.js');
 let handleKickstartCommand;
 let _HAS_KICKSTART = false;
 try {
@@ -25,6 +26,14 @@ try {
     _HAS_KICKSTART = typeof handleKickstartCommand === 'function';
 } catch (e) {
     _HAS_KICKSTART = false;
+}
+let handleMetaCommand;
+let _HAS_META = false;
+try {
+    handleMetaCommand = require('./meta_commands.js').handleMetaCommand;
+    _HAS_META = typeof handleMetaCommand === 'function';
+} catch (e) {
+    _HAS_META = false;
 }
 const { handleUninstallCommand } = require('./uninstall_commands.js');
 //--//
@@ -43,6 +52,8 @@ const COMMAND_HANDLERS = {
     'config': handleConfigCommand,
     'todos': handleTodosCommand,
     'tasks': handleTaskCommand,
+    'orchestration': handleOrchestrationCommand,
+    'implementation': handleOrchestrationCommand, // Legacy alias
     'uninstall': handleUninstallCommand,
 };
 
@@ -50,20 +61,44 @@ const COMMAND_HANDLERS = {
 if (_HAS_KICKSTART) {
     COMMAND_HANDLERS['kickstart'] = handleKickstartCommand;
 }
+if (_HAS_META) {
+    COMMAND_HANDLERS['meta'] = handleMetaCommand;
+}
+
+const ROOT_HELP_LINES = [
+    'state          - show, mode, task, todos, flags, update',
+    'config         - show, phrases, git, env, features, read, write, tools',
+    'tasks          - idx, start',
+    'orchestration  - begin, status, extend, end, locks, ownership (alias: implementation)',
+    'protocol       - startup-load',
+    'uninstall      - Remove cc-sessions framework'
+];
+
+if (_HAS_META) {
+    ROOT_HELP_LINES.push('meta           - dashboard');
+}
+
+if (_HAS_KICKSTART) {
+    ROOT_HELP_LINES.push('kickstart      - full, subagents, next, complete');
+}
 
 // Help dictionary for progressive disclosure
+const ORCHESTRATION_HELP = `Available orchestration commands:
+  begin --tasks <tasks> [--timeout <minutes>] [--allow-subagents|--no-subagents]
+                       - Open execution window for tasks
+  status [--json]      - Show current execution window status
+  extend --minutes <N> - Extend execution window timeout
+  end [--force]        - Close execution window
+  locks [--json]       - List all file assignments
+  ownership <file>     - Check who owns a specific file (legacy alias: implementation)`;
+
 const HELP_MESSAGES = {
     "root": `Available subsystems:
-  state    - show, mode, task, todos, flags, update
-  config   - show, phrases, git, env, features, read, write, tools
-  tasks    - idx, start
-  protocol - startup-load
-  uninstall - Remove cc-sessions framework${_HAS_KICKSTART ? `
-  kickstart - full, subagents, next, complete` : ''}`,
+  ${ROOT_HELP_LINES.join('\n  ')}`,
 
     "state": `Available state commands:
   show [section]   - Display state (task, todos, flags, mode)
-  mode <mode>      - Switch mode (discussion/no, bypass/off, implementation/go)
+  mode <mode>      - Switch mode (discussion/no, bypass/off, orchestration/go)
   task <action>    - Manage task (clear, show, restore <file>)
   todos <action>   - Manage todos (clear)
   flags <action>   - Manage flags (clear, clear-context)
@@ -127,7 +162,23 @@ Features: branch_enforcement, task_detection, auto_ultrathink, icon_style, warn_
   idx list        - List all task indexes
   idx <name>      - Show tasks in specific index
   start @<task>   - Start working on a task`,
+    "orchestration": ORCHESTRATION_HELP,
+    "implementation": ORCHESTRATION_HELP,
 };
+
+if (_HAS_META) {
+    HELP_MESSAGES["meta"] = `Available meta commands:
+  dashboard [--group <id>] [--range <hours>] [--limit <n>] [--json]
+      - Show meta-learning dashboard snapshot`;
+}
+
+if (_HAS_KICKSTART) {
+    HELP_MESSAGES["kickstart"] = `Available kickstart commands:
+  full        - Initialize full onboarding track
+  subagents   - Initialize subagents-only onboarding
+  next        - Load the next module chunk
+  complete    - Exit kickstart mode and clean up state`;
+}
 
 //-#
 
@@ -211,7 +262,7 @@ function routeCommand(command, args, jsonOutput = false, fromSlash = false) {
     if (fromSlash) {
         try {
             // Pass fromSlash to commands that support it
-            if (['config', 'state', 'tasks', 'uninstall'].includes(command)) {
+            if (['config', 'state', 'tasks', 'orchestration', 'implementation', 'uninstall'].includes(command)) {
                 return handler(args, jsonOutput, fromSlash);
             } else {
                 // For commands that don't support fromSlash, add it to args for backward compatibility
@@ -227,7 +278,7 @@ function routeCommand(command, args, jsonOutput = false, fromSlash = false) {
         }
     } else {
         // Normal API calls - let exceptions propagate
-        if (['config', 'state', 'tasks', 'uninstall'].includes(command)) {
+        if (['config', 'state', 'tasks', 'orchestration', 'implementation', 'uninstall'].includes(command)) {
             return handler(args, jsonOutput, fromSlash);
         } else {
             // For commands that don't support fromSlash, add it to args for backward compatibility
@@ -256,7 +307,7 @@ function formatSlashHelp() {
         "### State",
         "  /sessions state                 - Display current state",
         "  /sessions state show [section]  - Show specific section (task, todos, flags, mode)",
-        "  /sessions state mode <mode>     - Switch mode (discussion/no, bypass/off)",
+        "  /sessions state mode <mode>     - Switch mode (discussion/no, bypass/off, orchestration/go)",
         "  /sessions state task <action>   - Manage task (clear, show, restore <file>)",
         "  /sessions state todos <action>  - Manage todos (clear)",
         "  /sessions state flags <action>  - Manage flags (clear, clear-context)",

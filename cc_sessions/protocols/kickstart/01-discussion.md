@@ -36,8 +36,8 @@ SAY TO THE USER >>>
 
 Cool so cc-sessions has really two core systems that are complementary:
 
-**System 1: Discussion vs Implementation Mode**
-This basically means I physically cannot use "write-like" tools until you agree with what I'm proposing (Write, Edit, Bash with write-like commands, etc.)
+**System 1: Discussion vs Orchestration Mode**
+This basically means I physically cannot use tools that modify state until you agree with what I'm proposing (Write, Edit, Bash commands that modify files, etc.)
 
 **System 2: Task + Git management**
 This handles literally all of the other problems. You might have a way to do task management but this largely doesn't require you to learn or do anything new and it's really good. So just try it out and if you don't like it you can get a refund.
@@ -66,18 +66,18 @@ See? I literally can't do it. I can still **read** anything I need to in Discuss
 
 <<<
 
-Run: `sessions config phrases list implementation_mode`
+Run: `sessions config phrases list orchestration_mode`
 
 ---
 
 SAY TO THE USER >>>
 
-Now let's try switching to implementation mode - **use any of your available triggers:** [list the triggers from the command output]
+Now let's try switching to orchestration mode - **use any of your available triggers:** [list the triggers from the command output]
 
 <<<
 
-## After user provides trigger phrase and mode switches to implementation
+## After user provides trigger phrase and mode switches to orchestration
 
-Once implementation mode is activated, run: `sessions kickstart next`
+Once orchestration mode is activated, run: `sessions kickstart next`
 
 ---

@@ -1,0 +1,34 @@
+{
+  "version": "unknown",
+  "current_task": {
+    "name": null,
+    "file": null,
+    "branch": null,
+    "status": null,
+    "created": null,
+    "started": null,
+    "updated": null,
+    "dependencies": null,
+    "submodules": null
+  },
+  "active_protocol": null,
+  "api": {
+    "startup_load": false,
+    "completion": false,
+    "todos_clear": false
+  },
+  "mode": "discussion",
+  "todos": {
+    "active": [],
+    "stashed": []
+  },
+  "model": "sonnet",
+  "flags": {
+    "context_85": false,
+    "context_90": false,
+    "subagent": false,
+    "noob": true,
+    "bypass_mode": false
+  },
+  "metadata": {}
+}

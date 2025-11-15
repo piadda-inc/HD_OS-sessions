@@ -113,11 +113,43 @@ function withTranscriptLock(lockPath, callback, options = {}) {
     }
 }
 
+function readTranscriptTail(transcriptPath, maxBytes = 65536) {
+    if (!transcriptPath || !fs.existsSync(transcriptPath)) {
+        return "";
+    }
+
+    try {
+        const stat = fs.statSync(transcriptPath);
+        if (stat.size <= maxBytes) {
+            return fs.readFileSync(transcriptPath, 'utf8');
+        }
+
+        const fd = fs.openSync(transcriptPath, 'r');
+        try {
+            const start = Math.max(stat.size - maxBytes, 0);
+            const length = stat.size - start;
+            const buffer = Buffer.alloc(length);
+            fs.readSync(fd, buffer, 0, length, start);
+            let content = buffer.toString('utf8');
+            const firstNewline = content.indexOf('\n');
+            if (firstNewline !== -1) {
+                content = content.slice(firstNewline + 1);
+            }
+            return content;
+        } finally {
+            fs.closeSync(fd);
+        }
+    } catch {
+        return "";
+    }
+}
+
 module.exports = {
     TRANSCRIPTS_ROOT,
     LOCKS_ROOT,
     ensureTranscriptInfrastructure,
     resolveTranscriptTarget,
     withTranscriptLock,
-    sleep
+    sleep,
+    readTranscriptTail
 };

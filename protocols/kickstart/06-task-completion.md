@@ -27,14 +27,14 @@ Wait for acknowledgment, then continue.
 
 ---
 
-Run: `sessions config phrases list implementation_mode`
+Run: `sessions config phrases list orchestration_mode`
 
 ---
 
 SAY TO THE USER >>>
 Now, normally I would give you a proposal of my todos for completing or working on the task.
 
-Then we discuss until you approve by using one of your implementation mode trigger phrases.
+Then we discuss until you approve by using one of your orchestration mode trigger phrases.
 
 Here's a dummy proposal to demonstrate:
 
@@ -43,7 +43,7 @@ Here's a dummy proposal to demonstrate:
 □ Make sure you understand
 □ Show you what happens if I try to do some random stuff you didn't approve
 
-If you approve, use any of your trigger phrases: [list implementation_mode triggers from command above]
+If you approve, use any of your trigger phrases: [list orchestration_mode triggers from command above]
 <<<
 
 ## After user approves with trigger phrase:

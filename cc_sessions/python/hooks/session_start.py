@@ -5,6 +5,7 @@
 ## ===== STDLIB ===== ##
 from importlib.metadata import version, PackageNotFoundError
 import requests, json, sys, shutil, os, subprocess, platform
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 ##-##
 
@@ -12,6 +13,15 @@ from typing import Dict, List, Optional, Tuple
 ##-##
 
 ## ===== LOCAL ===== ##
+HOOKS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = HOOKS_DIR.parent
+REPO_PARENT = REPO_ROOT.parent
+DATA_MODULE_DIR = REPO_ROOT / "sessions"
+for candidate in (str(DATA_MODULE_DIR), str(REPO_ROOT), str(REPO_PARENT)):
+    if candidate not in sys.path:
+        sys.path.insert(0, candidate)
+
+from sessions.memory import get_client
 from shared_state import edit_state, PROJECT_ROOT, load_config, SessionsProtocol, get_task_file_path, is_directory_task
 ##-##
 
@@ -22,6 +32,7 @@ sessions_dir = PROJECT_ROOT / 'sessions'
 
 STATE = None
 CONFIG = load_config()
+MEMORY_CLIENT = get_client(getattr(CONFIG, "memory", None))
 
 developer_name = CONFIG.environment.developer_name
 
@@ -250,6 +261,32 @@ def list_open_tasks_grouped() -> str:
 """
     return output
 
+
+def render_memory_context(task_title: Optional[str]) -> str:
+    if (
+        not task_title
+        or not getattr(CONFIG.memory, "enabled", False)
+        or not getattr(CONFIG.memory, "auto_search", True)
+        or not getattr(MEMORY_CLIENT, "can_search", False)
+    ):
+        return ""
+    try:
+        results = MEMORY_CLIENT.search_memory(task_title)
+    except Exception:
+        return ""
+    if not results:
+        return ""
+    lines = ["\n## 📚 Relevant Memory\n"]
+    max_results = getattr(CONFIG.memory, "max_results", 5)
+    for fact in results[:max_results]:
+        text = fact.get("fact") if isinstance(fact, dict) else str(fact)
+        source = fact.get("episode_name") if isinstance(fact, dict) else None
+        lines.append(f"- {text}\n")
+        if source:
+            lines.append(f"  (from: {source})\n")
+    lines.append("\n")
+    return "".join(lines)
+
 #-#
 
 # ===== EXECUTION ===== #
@@ -324,8 +361,8 @@ Based on the task requirements, I propose the following implementation:
 □ [Specific action 3]
   → [Expanded explanation of what this involves]
 
-To approve these todos, you may use any of your implementation mode trigger phrases: 
-{CONFIG.trigger_phrases.implementation_mode}
+To approve these todos, you may use any of your orchestration mode trigger phrases: 
+{CONFIG.trigger_phrases.orchestration_mode}
 ```
 
 3. Iterate based on user feedback until approved
@@ -342,8 +379,12 @@ Once approved, remember:
 - Work logs are maintained by the logging agent (not manually)
 
 After completion of the last task in any todo list:
-- *Do not* try to run any write-based tools (you will be automatically put into discussion mode)
-- Repeat todo proposal and approval workflow for any additional write/edit-based work"""
+- *Do not* try to run any tools (you will be automatically put into discussion mode)
+- Repeat todo proposal and approval workflow for any additional work"""
+
+    memory_block = render_memory_context(STATE.current_task.name or STATE.current_task.file)
+    if memory_block:
+        context += memory_block
 
 else:
     context += list_open_tasks_grouped()

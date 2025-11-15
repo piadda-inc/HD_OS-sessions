@@ -1,6 +1,6 @@
 {
   "trigger_phrases": {
-    "implementation_mode": [
+    "orchestration_mode": [
       "yert"
     ],
     "discussion_mode": [
@@ -26,7 +26,9 @@
       "MultiEdit",
       "NotebookEdit"
     ],
-    "bash_read_patterns": [],
+    "bash_read_patterns": [
+      "python3"
+    ],
     "bash_write_patterns": [],
     "extrasafe": false
   },
@@ -48,15 +50,6 @@
     "task_detection": true,
     "auto_ultrathink": false,
     "icon_style": "ascii",
-    "meta_learning": {
-      "enabled": false,
-      "socket_path": ".meta-learning.sock",
-      "group_id": null,
-      "dashboard_default_range_hours": 24,
-      "dashboard_default_limit": 5,
-      "request_timeout_ms": 180000,
-      "reconnect_delay_ms": 250
-    },
     "context_warnings": {
       "warn_85": true,
       "warn_90": true

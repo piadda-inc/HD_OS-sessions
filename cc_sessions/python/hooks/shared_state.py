@@ -39,7 +39,7 @@ CONFIG_FILE = PROJECT_ROOT / "sessions" / "sessions-config.json"
 
 # Mode description strings
 DISCUSSION_MODE_MSG = "You are now in Discussion Mode and should focus on discussing and investigating with the user (no edit-based tools)"
-IMPLEMENTATION_MODE_MSG = "You are now in Implementation Mode and may use tools to execute the agreed upon actions - when you are done return immediately to Discussion Mode"
+ORCHESTRATION_MODE_MSG = "You are now in Orchestration Mode and may use tools to execute the agreed upon actions - when you are done return immediately to Discussion Mode"
 #-#
 
 """
@@ -75,7 +75,7 @@ class StashOccupiedError(RuntimeError): pass
 
 #!> Config enums
 class TriggerCategory(str, Enum):
-    IMPLEMENTATION_MODE = "implementation_mode"
+    ORCHESTRATION_MODE = "orchestration_mode"
     DISCUSSION_MODE = "discussion_mode"
     TASK_CREATION = "task_creation"
     TASK_STARTUP = "task_startup"
@@ -136,7 +136,7 @@ class SessionsProtocol(str, Enum):
 
 class Mode(str, Enum):
     NO = "discussion"
-    GO = "implementation"
+    GO = "orchestration"
 
 class TodoStatus(str, Enum):
     PENDING = "pending"
@@ -155,7 +155,7 @@ class Model(str, Enum):
 #!> Config components
 @dataclass
 class TriggerPhrases:
-    implementation_mode: List[str] = field(default_factory=lambda: ["yert"])
+    orchestration_mode: List[str] = field(default_factory=lambda: ["yert"])
     discussion_mode: List[str] = field(default_factory=lambda: ["SILENCE"])
     task_creation: List[str] = field(default_factory=lambda: ["mek:"])
     task_startup: List[str] = field(default_factory=lambda: ["start^"])
@@ -164,13 +164,13 @@ class TriggerPhrases:
 
     def _coax_phrase_type(self, phrase_type: str) -> TriggerCategory:
         mapping = {
-            "implement": TriggerCategory.IMPLEMENTATION_MODE,
+            "implement": TriggerCategory.ORCHESTRATION_MODE,
             "discuss": TriggerCategory.DISCUSSION_MODE,
             "create": TriggerCategory.TASK_CREATION,
             "start": TriggerCategory.TASK_STARTUP,
             "complete": TriggerCategory.TASK_COMPLETION,
             "compact": TriggerCategory.CONTEXT_COMPACTION,
-            "implementation_mode": TriggerCategory.IMPLEMENTATION_MODE,
+            "orchestration_mode": TriggerCategory.ORCHESTRATION_MODE,
             "discussion_mode": TriggerCategory.DISCUSSION_MODE,
             "task_creation": TriggerCategory.TASK_CREATION,
             "task_startup": TriggerCategory.TASK_STARTUP,
@@ -214,7 +214,7 @@ class TriggerPhrases:
             if lst is None or not isinstance(lst, list): raise ValueError(f"Unknown trigger category: {category}")
             return {category.value: lst}
         return {
-            TriggerCategory.IMPLEMENTATION_MODE.value: self.implementation_mode,
+            TriggerCategory.ORCHESTRATION_MODE.value: self.orchestration_mode,
             TriggerCategory.DISCUSSION_MODE.value: self.discussion_mode,
             TriggerCategory.TASK_CREATION.value: self.task_creation,
             TriggerCategory.TASK_STARTUP.value: self.task_startup,
@@ -341,6 +341,20 @@ class EnabledFeatures:
         )
 #!<
 
+@dataclass
+class MemoryConfig:
+    enabled: bool = False
+    provider: str = "graphiti"
+    graphiti_path: str = ""
+    auto_search: bool = True
+    auto_store: str = "off"
+    search_timeout_ms: int = 1500
+    store_timeout_s: float = 2.0
+    max_results: int = 5
+    group_id: str = "hd_os_workspace"
+    allow_code_snippets: bool = True
+    sanitize_secrets: bool = True
+
 #!> Config object
 @dataclass
 class SessionsConfig:
@@ -349,15 +363,26 @@ class SessionsConfig:
     environment: SessionsEnv = field(default_factory=SessionsEnv)
     blocked_actions: BlockingPatterns = field(default_factory=BlockingPatterns)
     features: EnabledFeatures = field(default_factory=EnabledFeatures)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "SessionsConfig":
+        # Handle backward compatibility: "implementation_mode" → "orchestration_mode"
+        trigger_data = d.get("trigger_phrases", {}).copy()  # Copy to avoid mutating input
+        if "implementation_mode" in trigger_data:
+            if "orchestration_mode" not in trigger_data:
+                # Migrate old key to new key
+                trigger_data["orchestration_mode"] = trigger_data["implementation_mode"]
+            # Remove old key regardless (if both present, new key wins)
+            trigger_data.pop("implementation_mode")
+
         return cls(
-            trigger_phrases=TriggerPhrases(**d.get("trigger_phrases", {})),
+            trigger_phrases=TriggerPhrases(**trigger_data),
             git_preferences=GitPreferences(**d.get("git_preferences", {})),
             environment=SessionsEnv(**d.get("environment", {})),
             blocked_actions=BlockingPatterns(**d.get("blocked_actions", {})),
-            features=EnabledFeatures.from_dict(d.get("features", {})))
+            features=EnabledFeatures.from_dict(d.get("features", {})),
+            memory=MemoryConfig(**d.get("memory", {})))
 
     def to_dict(self) -> Dict[str, Any]: return asdict(self)
 #!<
@@ -578,12 +603,19 @@ class SessionsState:
         api_data = d.get("api", {})
         if api_data and isinstance(api_data, dict): api_perms = APIPerms(**api_data)
         else: api_perms = APIPerms()
+
+        # Handle backward compatibility: "implementation" → "orchestration"
+        mode_str = d.get("mode", Mode.NO)
+        if mode_str == "implementation":  # Backward compatibility
+            mode_str = "orchestration"
+        mode = Mode(mode_str)
+
         return cls(
             version=d.get("version", pkg_version),
             current_task=TaskState(**d.get("current_task", {})),
             active_protocol=active_protocol,
             api=api_perms,
-            mode=Mode(d.get("mode", Mode.NO)),
+            mode=mode,
             todos=SessionsTodos(
                 active=[cls._coerce_todo(t) for t in d.get("todos", {}).get("active", [])],
                 stashed=[cls._coerce_todo(t) for t in d.get("todos", {}).get("stashed", [])],

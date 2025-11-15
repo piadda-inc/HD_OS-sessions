@@ -195,10 +195,10 @@ function handleBegin(args, jsonOutput) {
     }
 
     return [
-        'Implementation window opened.',
+        'Orchestration window opened.',
         renderWindowSummary(window),
         '',
-        'Implementation mode activated.'
+        'Orchestration mode activated.'
     ].join('\n');
 }
 

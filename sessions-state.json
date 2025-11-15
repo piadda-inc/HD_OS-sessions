@@ -17,7 +17,7 @@
     "completion": false,
     "todos_clear": false
   },
-  "mode": "discussion",
+  "mode": "orchestration",
   "todos": {
     "active": [],
     "stashed": []

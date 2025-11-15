@@ -21,6 +21,7 @@ const {
     findGitRepo,
     CCTools
 } = require('./shared_state.js');
+const { withTiming } = require('./benchmark_utils.js');
 ///-///
 
 //-//
@@ -35,14 +36,18 @@ try {
     inputData = {};
 }
 
+const inputSize = JSON.stringify(inputData).length;
+
 const toolName = inputData.tool_name || "";
 const toolInput = inputData.tool_input || {};
+const sessionId = inputData.session_id || "";
 
 let filePath = null;
 const filePathString = toolInput.file_path || "";
 if (filePathString) {
-    filePath = path.resolve(filePathString);
+    filePath = normalizeCommandPath(filePathString);
 }
+const taskId = typeof toolInput.task_id === 'string' ? toolInput.task_id : null;
 
 const STATE = loadState();
 const CONFIG = loadConfig();
@@ -56,6 +61,9 @@ if (toolName === "Bash") {
 if (toolName === "TodoWrite") {
     incomingTodos = toolInput.todos || [];
 }
+
+const STATE_DIR_MARKER = path.join('sessions', 'state');
+const STATE_DIR_MARKER_UNIX = STATE_DIR_MARKER.split(path.sep).join('/');
 
 /// ===== PATTERNS ===== ///
 const READONLY_FIRST = new Set([
@@ -140,6 +148,24 @@ const REDIR_PATTERNS = [
     /(?:^|\s)&>/                            // Combined stdout/stderr redirect
 ];
 const REDIR = new RegExp(REDIR_PATTERNS.map(p => p.source).join('|'));
+
+// Commands that accept explicit destination arguments which can mutate files
+const COMMAND_WRITE_PARSERS = {
+    cp: takeLastPositionalArg,
+    mv: takeLastPositionalArg,
+    install: takeLastPositionalArg,
+    ln: takeLastPositionalArg,
+    link: takeLastPositionalArg,
+    symlink: takeLastPositionalArg,
+    touch: takeAllPositionalArgs,
+    truncate: takeAllPositionalArgs,
+    rm: takeAllPositionalArgs,
+    rmdir: takeAllPositionalArgs,
+    unlink: takeAllPositionalArgs,
+    shred: takeAllPositionalArgs,
+    mkdir: takeAllPositionalArgs,
+    dd: extractDdTargets
+};
 ///-///
 
 function getGitBranchDetails(repoPath) {
@@ -170,6 +196,22 @@ function getGitBranchDetails(repoPath) {
     } catch {
         return null;
     }
+}
+
+function getExecutionPlanContext() {
+    const metadata = STATE.metadata || {};
+    const orchestration = metadata.orchestration;
+    if (!orchestration || !orchestration.execution_plan) {
+        return null;
+    }
+
+    const plan = orchestration.execution_plan;
+    const groups = Array.isArray(plan.groups) ? plan.groups : [];
+    if (groups.length === 0) {
+        return null;
+    }
+
+    return { orchestration, groups };
 }
 
 /// ===== CI DETECTION ===== ///
@@ -274,6 +316,610 @@ function checkCommandArguments(parts) {
     return true;
 }
 
+function blockSubagentOrchestrationWrite(targetPath) {
+    const message = "[Subagent Security] Subagents cannot modify orchestration state files.\n" +
+                    "File: " + targetPath + "\n" +
+                    "Only the orchestrator can update execution plans and session indexes.";
+    try {
+        fs.writeSync(process.stderr.fd, `${message}\n`);
+    } catch {
+        console.error(message);
+    }
+    process.exit(2);
+}
+
+function normalizeCommandPath(rawPath) {
+    if (typeof rawPath !== 'string') {
+        return null;
+    }
+
+    let target = rawPath.trim();
+    if (!target) {
+        return null;
+    }
+
+    if (target === '~' && process.env.HOME) {
+        target = process.env.HOME;
+    } else if (target.startsWith('~/') && process.env.HOME) {
+        target = path.join(process.env.HOME, target.slice(2));
+    }
+
+    const absolute = path.isAbsolute(target) ? target : path.join(PROJECT_ROOT, target);
+    return path.resolve(absolute);
+}
+
+function getOrchestrationFilePath(candidatePath) {
+    const normalizedPath = normalizeCommandPath(candidatePath);
+    if (!normalizedPath) {
+        return null;
+    }
+
+    let stats = null;
+    try {
+        stats = fs.lstatSync(normalizedPath);
+        if (stats.isSymbolicLink()) {
+            return normalizedPath;
+        }
+    } catch {
+        stats = null;
+    }
+
+    let resolvedPath = normalizedPath;
+    try {
+        resolvedPath = fs.realpathSync(normalizedPath);
+    } catch {
+        // Ignore - file might not exist yet
+    }
+
+    if (matchesOrchestrationTarget(resolvedPath)) {
+        return normalizedPath;
+    }
+
+    if (resolvedPath !== normalizedPath && matchesOrchestrationTarget(normalizedPath)) {
+        return normalizedPath;
+    }
+
+    return null;
+}
+
+function matchesOrchestrationTarget(targetPath) {
+    if (!targetPath) {
+        return false;
+    }
+
+    const basename = path.basename(targetPath);
+    const isUnifiedState = basename === 'sessions-state.json' || basename.startsWith('sessions-state.json.');
+    if (isUnifiedState) {
+        return true;
+    }
+
+    const isSessionIndex = basename === 'session_index.json' || basename.startsWith('session_index.json.');
+    const isExecutionPlan = basename === 'execution_plan.json' || basename.startsWith('execution_plan.json.');
+    if (!isSessionIndex && !isExecutionPlan) {
+        return false;
+    }
+
+    return isWithinStateDirectory(targetPath);
+}
+
+function isWithinStateDirectory(targetPath) {
+    const relative = path.relative(PROJECT_ROOT, targetPath);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+        return false;
+    }
+
+    const normalizedRelative = relative.split(path.sep).join('/');
+    return normalizedRelative === STATE_DIR_MARKER_UNIX ||
+        normalizedRelative.startsWith(`${STATE_DIR_MARKER_UNIX}/`);
+}
+
+function isProcessSubstitutionTarget(target) {
+    return typeof target === 'string' && /^[<>]\(/.test(target.trim());
+}
+
+function getProcessSubstitutionCommand(expression) {
+    if (!isProcessSubstitutionTarget(expression)) {
+        return null;
+    }
+
+    const parsed = readProcessSubstitution(expression.trim(), 0);
+    if (parsed && typeof parsed.command === 'string') {
+        return parsed.command;
+    }
+
+    return null;
+}
+
+function isFileDescriptorReference(operator, target) {
+    return typeof target === 'string' &&
+        /^\d+$/.test(target) &&
+        typeof operator === 'string' &&
+        operator.endsWith('&');
+}
+
+function readRedirectTarget(command, startIndex) {
+    const len = command.length;
+    let i = startIndex;
+
+    while (i < len && /\s/.test(command[i])) {
+        i++;
+    }
+
+    if (i >= len) {
+        return { token: '', nextIndex: len };
+    }
+
+    let processSubstitution = null;
+    if (command[i] === '(' && i > 0 && (command[i - 1] === '>' || command[i - 1] === '<')) {
+        processSubstitution = readProcessSubstitution(command, i - 1);
+    } else {
+        processSubstitution = readProcessSubstitution(command, i);
+    }
+    if (processSubstitution) {
+        return {
+            token: processSubstitution.expression,
+            nextIndex: processSubstitution.nextIndex,
+            processSubstitution: processSubstitution.command
+        };
+    }
+
+    let token = '';
+    let inSingle = false;
+    let inDouble = false;
+    let escape = false;
+
+    while (i < len) {
+        const ch = command[i];
+
+        if (escape) {
+            token += ch;
+            escape = false;
+            i++;
+            continue;
+        }
+
+        if (ch === '\\' && !inSingle) {
+            escape = true;
+            i++;
+            continue;
+        }
+
+        if (ch === "'" && !inDouble) {
+            inSingle = !inSingle;
+            i++;
+            continue;
+        }
+
+        if (ch === '"' && !inSingle) {
+            inDouble = !inDouble;
+            i++;
+            continue;
+        }
+
+        if (!inSingle && !inDouble) {
+            if (/\s/.test(ch) || ch === ';' || ch === '|' || ch === '&' || ch === '>') {
+                break;
+            }
+        }
+
+        token += ch;
+        i++;
+    }
+
+    return { token: token.trim(), nextIndex: i };
+}
+
+function readWriteRedirection(command, startIndex) {
+    const len = command.length;
+    let i = startIndex;
+
+    let prefix = '';
+    while (i < len && /\d/.test(command[i])) {
+        prefix += command[i];
+        i++;
+    }
+
+    if (i >= len) {
+        return null;
+    }
+
+    if (command[i] === '&' && command[i + 1] === '>') {
+        const operator = (prefix || '') + '&>';
+        return { operator, nextIndex: i + 2 };
+    }
+
+    if (command[i] !== '>') {
+        return null;
+    }
+
+    let operator = prefix + '>';
+    i++;
+
+    if (command[i] === '>') {
+        operator += '>';
+        i++;
+    }
+
+    if (command[i] === '&') {
+        operator += '&';
+        i++;
+    }
+
+    return { operator, nextIndex: i };
+}
+
+function readProcessSubstitution(command, startIndex) {
+    const len = command.length;
+    let i = startIndex;
+
+    if (i >= len) {
+        return null;
+    }
+
+    const operator = command[i];
+    if (operator !== '>' && operator !== '<') {
+        return null;
+    }
+
+    if (i + 1 >= len || command[i + 1] !== '(') {
+        return null;
+    }
+
+    i += 2; // Skip operator and opening parenthesis
+    let depth = 1;
+    let inSingle = false;
+    let inDouble = false;
+    let escape = false;
+    let content = '';
+
+    while (i < len) {
+        const ch = command[i];
+
+        if (escape) {
+            content += ch;
+            escape = false;
+            i++;
+            continue;
+        }
+
+        if (ch === '\\' && !inSingle) {
+            escape = true;
+            i++;
+            continue;
+        }
+
+        content += ch;
+
+        if (ch === "'" && !inDouble) {
+            inSingle = !inSingle;
+        } else if (ch === '"' && !inSingle) {
+            inDouble = !inDouble;
+        } else if (!inSingle && !inDouble) {
+            if (ch === '(') {
+                depth++;
+            } else if (ch === ')') {
+                depth--;
+                if (depth === 0) {
+                    content = content.slice(0, -1);
+                    return {
+                        expression: command.slice(startIndex, i + 1),
+                        command: content,
+                        nextIndex: i + 1
+                    };
+                }
+            }
+        }
+
+        i++;
+    }
+
+    return {
+        expression: command.slice(startIndex),
+        command: content,
+        nextIndex: len
+    };
+}
+
+function tokenizeShell(command) {
+    const tokens = [];
+    if (!command) {
+        return tokens;
+    }
+
+    let current = '';
+    let inSingle = false;
+    let inDouble = false;
+    let escape = false;
+
+    const flush = () => {
+        if (current) {
+            tokens.push(current);
+            current = '';
+        }
+    };
+
+    for (let i = 0; i < command.length; i++) {
+        const ch = command[i];
+
+        if (escape) {
+            current += ch;
+            escape = false;
+            continue;
+        }
+
+        if (ch === '\\' && !inSingle) {
+            escape = true;
+            continue;
+        }
+
+        if (ch === "'" && !inDouble) {
+            inSingle = !inSingle;
+            continue;
+        }
+
+        if (ch === '"' && !inSingle) {
+            inDouble = !inDouble;
+            continue;
+        }
+
+        if (!inSingle && !inDouble) {
+            if (/\s/.test(ch)) {
+                flush();
+                continue;
+            }
+
+            if (ch === '|' || ch === '&' || ch === ';') {
+                flush();
+
+                let op = ch;
+                if ((ch === '|' || ch === '&') && command[i + 1] === ch) {
+                    op += command[++i];
+                } else if (ch === '|' && command[i + 1] === '&') {
+                    op += command[++i];
+                }
+                tokens.push(op);
+                continue;
+            }
+        }
+
+        current += ch;
+    }
+
+    flush();
+    return tokens;
+}
+
+function extractTeeTargets(command) {
+    const tokens = tokenizeShell(command);
+    const targets = [];
+
+    for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        if (path.basename(token) !== 'tee') {
+            continue;
+        }
+
+        for (let j = i + 1; j < tokens.length; j++) {
+            const candidate = tokens[j];
+            if (candidate === '|' || candidate === '||' || candidate === '&&' || candidate === ';') {
+                break;
+            }
+
+            if (!candidate || candidate.startsWith('-')) {
+                continue;
+            }
+
+            targets.push(candidate);
+        }
+    }
+
+    return targets;
+}
+
+function extractBashTargets(command) {
+    if (!command) {
+        return [];
+    }
+
+    const targets = [];
+    const len = command.length;
+    let i = 0;
+    let inSingle = false;
+    let inDouble = false;
+    let escape = false;
+
+    while (i < len) {
+        const ch = command[i];
+
+        if (escape) {
+            escape = false;
+            i++;
+            continue;
+        }
+
+        if (ch === '\\' && !inSingle) {
+            escape = true;
+            i++;
+            continue;
+        }
+
+        if (ch === "'" && !inDouble) {
+            inSingle = !inSingle;
+            i++;
+            continue;
+        }
+
+        if (ch === '"' && !inSingle) {
+            inDouble = !inDouble;
+            i++;
+            continue;
+        }
+
+        if (!inSingle && ch === '<' && i + 1 < len && command[i + 1] === '(') {
+            const substitution = readProcessSubstitution(command, i);
+            if (substitution) {
+                const nestedTargets = extractBashTargets(substitution.command);
+                targets.push(...nestedTargets);
+                i = substitution.nextIndex;
+                continue;
+            }
+        }
+
+        if (!inSingle && (ch === '>' || ch === '&' || /\d/.test(ch))) {
+            const redir = readWriteRedirection(command, i);
+            if (redir) {
+                const { token, nextIndex, processSubstitution } = readRedirectTarget(command, redir.nextIndex);
+                i = nextIndex;
+                if (!token) {
+                    continue;
+                }
+                if (isFileDescriptorReference(redir.operator, token)) {
+                    continue;
+                }
+                if (processSubstitution) {
+                    const nestedTargets = extractBashTargets(processSubstitution);
+                    targets.push(...nestedTargets);
+                    continue;
+                }
+                if (isProcessSubstitutionTarget(token)) {
+                    const substitutionCommand = getProcessSubstitutionCommand(token);
+                    if (substitutionCommand) {
+                        const nestedTargets = extractBashTargets(substitutionCommand);
+                        targets.push(...nestedTargets);
+                    }
+                    continue;
+                }
+                targets.push(token);
+                continue;
+            }
+        }
+
+        i++;
+    }
+
+    for (const candidate of extractTeeTargets(command)) {
+        if (candidate && !isProcessSubstitutionTarget(candidate)) {
+            targets.push(candidate);
+        }
+    }
+
+    const seen = new Set();
+    return targets.filter(target => {
+        if (!target) {
+            return false;
+        }
+        if (seen.has(target)) {
+            return false;
+        }
+        seen.add(target);
+        return true;
+    });
+}
+
+function extractCommandWriteTargets(command) {
+    if (!command) {
+        return [];
+    }
+
+    const tokens = tokenizeShell(command);
+    if (tokens.length === 0) {
+        return [];
+    }
+
+    const segments = [];
+    let current = [];
+    for (const token of tokens) {
+        if (token === '|' || token === '||' || token === '&&' || token === ';') {
+            if (current.length > 0) {
+                segments.push(current);
+            }
+            current = [];
+            continue;
+        }
+        current.push(token);
+    }
+    if (current.length > 0) {
+        segments.push(current);
+    }
+
+    const targets = [];
+    for (const segment of segments) {
+        if (segment.length === 0) {
+            continue;
+        }
+        const first = segment[0].toLowerCase();
+        const parser = COMMAND_WRITE_PARSERS[first];
+        if (!parser) {
+            continue;
+        }
+        const args = segment.slice(1);
+        for (const candidate of parser(args)) {
+            if (candidate && !isProcessSubstitutionTarget(candidate)) {
+                targets.push(candidate);
+            }
+        }
+    }
+
+    const seen = new Set();
+    return targets.filter(target => {
+        if (seen.has(target)) {
+            return false;
+        }
+        seen.add(target);
+        return true;
+    });
+}
+
+function extractPositionalArgs(args) {
+    const positional = [];
+    let afterDoubleDash = false;
+    for (const arg of args) {
+        if (!afterDoubleDash && arg === '--') {
+            afterDoubleDash = true;
+            continue;
+        }
+        if (!afterDoubleDash && arg.startsWith('-')) {
+            continue;
+        }
+        positional.push(arg);
+    }
+    return positional;
+}
+
+function takeLastPositionalArg(args) {
+    const positional = extractPositionalArgs(args);
+    if (positional.length === 0) {
+        return [];
+    }
+    return [positional[positional.length - 1]];
+}
+
+function takeAllPositionalArgs(args) {
+    return extractPositionalArgs(args);
+}
+
+function extractDdTargets(args) {
+    const targets = [];
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (arg.startsWith('of=')) {
+            const target = arg.slice(3);
+            if (target) {
+                targets.push(target);
+            }
+            continue;
+        }
+        if (arg === 'of' && i + 1 < args.length) {
+            const target = args[i + 1];
+            if (target) {
+                targets.push(target);
+            }
+            i++;
+        }
+    }
+    return targets;
+}
+
 // Check if a bash command is read-only (no writes, no redirections)
 function isBashReadOnly(command, extrasafe = CONFIG.blocked_actions.extrasafe || true) {
     /*Determine if a bash command is read-only.
@@ -365,10 +1011,74 @@ function isBashReadOnly(command, extrasafe = CONFIG.blocked_actions.extrasafe ||
 
 // ===== EXECUTION ===== //
 
+// Wrap the entire execution in timing
+const exitCode = withTiming('sessions_enforce', () => {
+
 // Skip DAIC enforcement in CI environments
 if (isCIEnvironment()) {
-    process.exit(0);
+    return 0;
 }
+
+//!> Task orchestration gate
+if (toolName === "Task" && !STATE.flags?.bypass_mode) {
+    // CRITICAL: Block nested subagents
+    if (STATE.flags.subagent) {
+        console.error("[Task Gate] Subagents cannot spawn nested subagents.\n" +
+                      "Only the orchestrator can dispatch Task tools.\n" +
+                      "Current context: subagent | Required context: orchestrator");
+        process.exit(2);
+    }
+
+    const planContext = getExecutionPlanContext();
+    if (planContext && taskId) {
+        const { orchestration, groups } = planContext;
+        const planSession = orchestration.session_id;
+
+        if (planSession && sessionId && sessionId !== planSession) {
+            console.error(`[Task Gate] Execution plan belongs to session '${planSession}', but this request is for session '${sessionId}'.`);
+            process.exit(2);
+        }
+
+        const owningGroup = groups.find(group => {
+            const taskIds = Array.isArray(group?.task_ids) ? group.task_ids : [];
+            return taskIds.includes(taskId);
+        });
+
+        if (!owningGroup) {
+            console.error(`[Task Gate] Task '${taskId}' is not part of the current execution plan.`);
+            console.error("Update the execution plan or request access to the running group before invoking Task.");
+            process.exit(2);
+        }
+
+        if ((owningGroup.status || '').toLowerCase() !== 'running') {
+            console.error(`[Task Gate] Group '${owningGroup.group_id}' is in status '${owningGroup.status}'. Only running groups may dispatch tasks.`);
+            process.exit(2);
+        }
+
+        const dependencies = Array.isArray(owningGroup.depends_on) ? owningGroup.depends_on : [];
+        if (dependencies.length > 0) {
+            const unresolved = dependencies.filter(depId => {
+                const match = groups.find(group => group?.group_id === depId);
+                if (!match) {
+                    return true;
+                }
+                return (match.status || '').toLowerCase() !== 'completed';
+            });
+
+            if (unresolved.length > 0) {
+                console.error(`[Task Gate] Dependencies still running: ${unresolved.join(', ')}`);
+                process.exit(2);
+            }
+        }
+
+        editState(state => {
+            if (!state.metadata) state.metadata = {};
+            if (!state.metadata.orchestration) state.metadata.orchestration = {};
+            state.metadata.orchestration.active_group_id = owningGroup.group_id;
+        });
+    }
+}
+//!<
 
 //!> Bash command handling
 // For Bash commands, check if it's a read-only operation
@@ -384,7 +1094,7 @@ if (toolName === "Bash" && STATE.mode === Mode.NO && !STATE.flags.bypass_mode) {
         const isWindows = process.platform === "win32";
         const sessionsCmd = isWindows ? "sessions/bin/sessions.bat" : "sessions/bin/sessions";
 
-        console.error(`[DAIC] Blocked write-like Bash command in Discussion mode. Only the user can activate implementation mode. Explain what you want to do and seek alignment and approval first.\n` +
+        console.error(`[DAIC] Blocked write-like Bash command in Discussion mode. Only the user can activate orchestration mode. Explain what you want to do and seek alignment and approval first.\n` +
                       `Note: Both Claude and the user can configure allowed commands:\n` +
                       `  - View allowed: ${sessionsCmd} config read list\n` +
                       `  - Add command: ${sessionsCmd} config read add <command>\n` +
@@ -396,15 +1106,43 @@ if (toolName === "Bash" && STATE.mode === Mode.NO && !STATE.flags.bypass_mode) {
 }
 //!<
 
+//!> Subagent Bash command orchestration protection (command parsing)
+if (STATE.flags.subagent && toolName === "Bash" && command) {
+    const bashTargets = [
+        ...extractBashTargets(command),
+        ...extractCommandWriteTargets(command)
+    ];
+    for (const target of new Set(bashTargets)) {
+        const orchestrationPath = getOrchestrationFilePath(target);
+        if (orchestrationPath) {
+            blockSubagentOrchestrationWrite(orchestrationPath);
+        }
+    }
+}
+//!<
+
 //!> Block any attempt to modify sessions-state.json directly
-if (filePath && toolName === "Bash" &&
+if (STATE.flags.subagent && filePath && toolName === "Bash" &&
     path.basename(filePath) === 'sessions-state.json' &&
     path.basename(path.dirname(filePath)) === 'sessions') {
     // Check if it's a modifying operation
     if (!isBashReadOnly(command)) {
-        console.error("[Security] Direct modification of sessions-state.json is not allowed. " +
-                      "This file should only be modified through the TodoWrite tool and approved commands.");
-        process.exit(2);
+        blockSubagentOrchestrationWrite(filePath);
+    }
+}
+//!<
+
+//!> Subagent orchestration state protection
+if (STATE.flags.subagent && filePath) {
+    const orchestrationPath = getOrchestrationFilePath(filePath);
+    if (orchestrationPath) {
+        if (toolName === "Bash" && !isBashReadOnly(command)) {
+            blockSubagentOrchestrationWrite(orchestrationPath);
+        }
+
+        if (["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(toolName)) {
+            blockSubagentOrchestrationWrite(orchestrationPath);
+        }
     }
 }
 //!<
@@ -442,7 +1180,7 @@ if (toolName === "TodoWrite" && !STATE.flags.bypass_mode) {
             const proposedDisplay = incomingNames.map((name, i) => `  ${i+1}. ${name}`).join('\n');
 
             // Get user's implementation trigger phrases
-            const triggerPhrases = CONFIG.trigger_phrases.implementation_mode;
+            const triggerPhrases = CONFIG.trigger_phrases.orchestration_mode;
             const triggerList = triggerPhrases.map(p => `"${p}"`).join(', ');
 
             // Clear todos and revert to discussion mode (preparing for re-approval)
@@ -505,14 +1243,12 @@ if (!filePath) {
     process.exit(0); // No file path, allow to proceed
 }
 
-// Block direct modification of state file via Write/Edit/MultiEdit
-if (["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(toolName) &&
+// Block direct modification of state file via Write/Edit/MultiEdit for subagents
+if (STATE.flags.subagent &&
+    ["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(toolName) &&
     path.basename(filePath) === 'sessions-state.json' &&
-    path.basename(path.dirname(filePath)) === 'sessions' &&
-    !STATE.flags.bypass_mode) {
-    console.error("[Security] Direct modification of sessions-state.json is not allowed. " +
-                  "This file should only be modified through the TodoWrite tool and approved commands.");
-    process.exit(2);
+    path.basename(path.dirname(filePath)) === 'sessions') {
+    blockSubagentOrchestrationWrite(filePath);
 }
 //!<
 
@@ -590,4 +1326,8 @@ if (repoPath) {
 //-//
 
 // Allow tool to proceed
-process.exit(0);
+return 0;
+
+}, { tool: toolName, input_size: inputSize });
+
+process.exit(exitCode);

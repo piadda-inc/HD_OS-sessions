@@ -24,11 +24,17 @@
 
 ## latest updates
 
-<strong>latest release - v0.3.0</strong>
+<strong>latest release - HD_OS-sessions (based on v0.3.0)</strong>
 <br>
-<em>it's basically autopilot</em>
+<em>it's basically autopilot + multi-agent orchestration</em>
 
-**major highlights:**
+**HD_OS-sessions enhancements:**
+- **🆕 Automatic Backlog Integration**: piadda-backlog installed automatically for multi-agent orchestration
+- **🆕 Task Orchestration**: Coordinate multiple agents with dependency tracking and parallel execution
+- **🆕 Backlog Management**: Built-in task tracking, status management, and work logs
+- **🆕 Graphiti Memory Adapter**: Optional GraphitiLocal IPC adapter for searching prior work on SessionStart and storing task completions
+
+**Base features from cc-sessions v0.3.0:**
 - **Dual Language Support**: Now available as both Python and Node.js packages with complete feature parity
 - **Unified Sessions API**: Single `sessions` command replaces multiple slash commands
 - **Natural Language Protocols**: Full workflow automation through trigger phrases (mek:, start^:, finito, squish)
@@ -82,6 +88,8 @@ The installer sets up:
 - Initial state in `sessions/sessions-state.json`
 - Configuration in `sessions/sessions-config.json`
 - Automatic `.gitignore` entries for runtime files
+- **Backlog directories** in `backlog/` and `backlog/tasks/` for task orchestration
+- **piadda-backlog dependency** - automatically installed for multi-agent orchestration
 </details>
 
 ### updates and uninstalls/reinstalls
@@ -100,6 +108,129 @@ The system automatically preserves your work:
 You can select whether to take the interactive tutorial at the end of the installer. Its pretty quick and it will fully onboard you if you're new, using cc-sessions to teach you cc-sessions.
 
 The system teaches itself through index-based progression, then cleans up its own onboarding files on graduation.
+
+<br>
+
+## backlog integration (hd_os-sessions)
+
+**HD_OS-sessions** includes automatic integration with [piadda-backlog](https://github.com/piadda-inc/piadda-backlog) for multi-agent task orchestration.
+
+### Automatic Installation
+
+The installer automatically:
+- ✅ **Installs piadda-backlog** via pip during setup (required dependency)
+- ✅ **Creates backlog directories** (`backlog/` and `backlog/tasks/`)
+- ✅ **Tracks installation status** in `sessions-state.json` metadata
+
+**For pip/pipx users**: Dependency installed automatically via `pyproject.toml`
+
+**For npm/npx users**: Installer runs `python3 -m pip install piadda-backlog` automatically
+
+### If Installation Fails
+
+If automatic installation fails (no Python, network issues, etc.):
+1. Installer continues (non-fatal)
+2. Orchestration features are disabled
+3. You'll see a warning with manual install command:
+   ```bash
+   python3 -m pip install "piadda-backlog @ git+https://github.com/piadda-inc/piadda-backlog.git"
+   ```
+4. After manual install, re-run HD_OS-sessions installer to enable orchestration
+
+### What You Get
+
+- **Task orchestration**: Coordinate multiple agents working in parallel
+- **Dependency tracking**: Manage task dependencies and execution order
+- **Backlog management**: Track tasks, status, and work logs
+- **Execution planning**: Build and execute multi-phase workflows
+
+<br>
+
+## graphiti memory (optional)
+
+HD_OS-sessions optionally integrates with `graphiti_local` so sessions can reuse context from prior work and store new episodes without extra tooling.
+
+### What the adapter does
+
+- `sessions/memory/*.py` and `lib/memory/*.js` expose the same `MemoryClient` API using an adapter pattern. When `memory.enabled` is `true` and a `graphiti_path` is available, the `GraphitiAdapter` shells out to `graphiti_local`; otherwise the `NoopAdapter` returns empty results to keep hooks silent.
+- `SessionStart` calls `search_memory()` when `memory.auto_search` is enabled and injects a `## 📚 Relevant Memory` block above the task brief.
+- `PostToolUse` builds an episode payload and waits for `store_episode()` to finish when the task-completion protocol ends and `memory.auto_store` is `task-completion` (or `both`). The hook races storage against a 2-second guard so Graphiti stalls never hang the process.
+- Both runtimes sanitize payloads (`sanitize_secrets`) before IPC and enforce `max_results`, `search_timeout_ms`, and `store_timeout_s` so Graphiti failures never block the session.
+
+### Installing graphiti_local
+
+- Run `bin/install-memory.sh` to install the Graphiti memory stack (FalkorDB container, `graphiti_local` CLI, and Python dependencies) in a single step. The script is idempotent and safe to rerun after upgrades.
+- If your environment already ships with Graphiti, point `memory.graphiti_path` at the existing executable (`graphiti_local`, `/opt/graphiti/graphiti_local.py`, etc.).
+- Skipping installation leaves memory disabled; hooks fall back to the no-op adapter and operate as usual.
+
+### Configuring `sessions/sessions-config.json`
+
+Add or edit the `memory` block (copy-pasteable):
+
+```jsonc
+{
+  "memory": {
+    "enabled": true,
+    "provider": "graphiti",
+    "graphiti_path": "/usr/local/bin/graphiti_local",
+    "auto_search": true,
+    "auto_store": "task-completion",
+    "search_timeout_ms": 1500,
+    "store_timeout_s": 2.0,
+    "max_results": 5,
+    "group_id": "hd_os_workspace",
+    "allow_code_snippets": true,
+    "sanitize_secrets": true
+  }
+}
+```
+
+Allowed values for `auto_store`: `off`, `task-completion`, or `both` (behaves the same as `task-completion` today). Auto-store currently only triggers at the end of the completion protocol. Toggle `allow_code_snippets` when you want snippet text included in search responses.
+
+### Programmatic access + parity
+
+Because both runtimes share the same interface, you can access memory utilities anywhere in the repo:
+
+```python
+from sessions.memory import get_client
+from shared_state import load_config
+
+client = get_client(load_config().memory)
+if client.can_search:
+    facts = client.search_memory("vector rollback plan")
+if client.can_store:
+    client.store_episode({
+        "summary": "Added rollback automation",
+        "workspace_id": "hd_os_workspace",
+        "objectives": ["Detect drift", "Alert operators"]
+    })
+```
+
+```javascript
+const { getClient } = require('./lib/memory');
+const { loadConfig } = require('./hooks/shared_state');
+
+async function hydrateMemory() {
+    const client = getClient(loadConfig().memory);
+    if (client.canSearch) {
+        const facts = await client.searchMemory('vector rollback plan');
+        console.log(facts);
+    }
+    if (client.canStore) {
+        await client.storeEpisode({
+            summary: 'Added rollback automation',
+            workspace_id: 'hd_os_workspace',
+            objectives: ['Detect drift', 'Alert operators'],
+        });
+    }
+}
+
+hydrateMemory().catch(err => {
+    console.error('memory hydration failed', err);
+});
+```
+
+If `graphiti_local` is missing or returns a non-zero exit code, both adapters quietly return `[]` / `False` so the surrounding hooks continue without surfacing errors in Claude Code.
 
 <br>
 
@@ -252,4 +383,3 @@ If your suggestion or PR is good and used, we'll credit you even if inlined.
 MIT License. It's a public good - use it, fork it, make it better.
 
 See the [LICENSE](LICENSE) file for the legal details.
-

@@ -8,6 +8,7 @@ const fsp = fs.promises;
 const path = require('path');
 const os = require('os');
 const cp = require('child_process');
+const { spawnSync } = cp;
 ///-///
 
 /// ===== 3RD-PARTY ===== ///
@@ -770,7 +771,7 @@ function print_go_triggers_section() {
   console.log(color('║   ██║  ██║╚══╝██║██╔═══╝ ██║     ██╔══╝ ██║╚══╝██║██╔══╝ ██╔████║  ██║   ║',Colors.GREEN));
   console.log(color('║ ██████╗██║    ██║██║     ███████╗██████╗██║    ██║██████╗██║╚███║  ██║   ║',Colors.GREEN));
   console.log(color('║ ╚═════╝╚═╝    ╚═╝╚═╝     ╚══════╝╚═════╝╚═╝    ╚═╝╚═════╝╚═╝ ╚══╝  ╚═╝   ║',Colors.GREEN));
-  console.log(color('╚════════════ activate implementation mode (claude can code) ══════════════╝',Colors.GREEN));
+  console.log(color('╚═══════════ activate orchestration mode (claude coordinates) ════════════╝',Colors.GREEN));
   console.log();
   console.log();
 }
@@ -966,6 +967,7 @@ function create_directory_structure(project_root) {
     '.claude', '.claude/agents', '.claude/commands',
     'sessions', 'sessions/tasks', 'sessions/tasks/done', 'sessions/tasks/indexes',
     'sessions/hooks', 'sessions/api', 'sessions/protocols', 'sessions/knowledge',
+    'backlog', 'backlog/tasks',
   ];
   for (const d of dirs) fs.mkdirSync(path.join(project_root, d), { recursive: true });
 }
@@ -1094,7 +1096,7 @@ const V026_PATTERNS = {
         type: 'object',
         required_keys: ['mode'],
         properties: {
-          mode: { enum: ['discussion', 'implementation'] }
+          mode: { enum: ['discussion', 'orchestration'] }
         }
       },
       example: { mode: 'discussion' }
@@ -2093,10 +2095,10 @@ async function _ask_shell() {
 
 async function _edit_bash_read_patterns() {
   const info = [
-    color('In Discussion mode, Claude can only use read-like tools (including commands in', Colors.CYAN),
+    color('In Discussion mode, Claude can only use read-only tools (including commands in', Colors.CYAN),
     color('the Bash tool).', Colors.CYAN),
     color("To do this, we parse Claude's Bash tool input in Discussion mode to check for", Colors.CYAN),
-    color('write-like and read-only bash commands from a known list.', Colors.CYAN),
+    color('commands that modify state vs read-only commands from a known list.', Colors.CYAN),
     '',
     'You might have some CLI commands that you want to mark as "safe" to use in Discussion mode.',
     'For reference, here are the commands we already auto-approve in Discussion mode:',
@@ -2122,8 +2124,8 @@ async function _edit_bash_read_patterns() {
 
 async function _edit_bash_write_patterns() {
   const info = [
-    color('Similar to the read-only bash commands, we also check for write-like bash', Colors.CYAN),
-    color('commands during Discussion mode and block them.', Colors.CYAN), '',
+    color('Similar to the read-only bash commands, we also check for commands that', Colors.CYAN),
+    color('modify state during Discussion mode and block them.', Colors.CYAN), '',
     'You might have some CLI commands that you want to mark as blocked in Discussion mode.',
     'For reference, here are the commands we already block in Discussion mode:',
     color('rm, mv, cp, chmod, chown, mkdir, rmdir, systemctl, service', Colors.YELLOW),
@@ -2186,7 +2188,7 @@ async function _customize_triggers() {
     color('phrases that automatically activate the 4 protocols and 2 driving modes in', Colors.CYAN),
     color('cc-sessions:', Colors.CYAN),
     color('╔══════════════════════════════════════════════════════╗', Colors.YELLOW),
-    `${color('║', Colors.YELLOW)}  • Switch to implementation mode ${color('(default: "yert")', Colors.GREEN)}   ${color('║', Colors.YELLOW)}`,
+    `${color('║', Colors.YELLOW)}  • Switch to orchestration mode ${color('(default: "yert")', Colors.GREEN)}    ${color('║', Colors.YELLOW)}`,
     `${color('║', Colors.YELLOW)}  • Switch to discussion mode ${color('(default: "SILENCE")', Colors.GREEN)}    ${color('║', Colors.YELLOW)}`,
     `${color('║', Colors.YELLOW)}  • Create a new task/task file ${color('(default: "mek:")', Colors.GREEN)}     ${color('║', Colors.YELLOW)}`,
     `${color('║', Colors.YELLOW)}  • Start a task/task file ${color('(default: "start^:")', Colors.GREEN)}       ${color('║', Colors.YELLOW)}`,
@@ -2201,7 +2203,7 @@ async function _customize_triggers() {
   await ss.editConfig((conf) => {
     if (!conf.trigger_phrases) conf.trigger_phrases = {};
     const tp = conf.trigger_phrases;
-    if (!tp.implementation_mode || !tp.implementation_mode.length) tp.implementation_mode = ['yert'];
+    if (!tp.orchestration_mode || !tp.orchestration_mode.length) tp.orchestration_mode = ['yert'];
     if (!tp.discussion_mode || !tp.discussion_mode.length) tp.discussion_mode = ['SILENCE'];
     if (!tp.task_creation || !tp.task_creation.length) tp.task_creation = ['mek:'];
     if (!tp.task_startup || !tp.task_startup.length) tp.task_startup = ['start^:'];
@@ -2213,9 +2215,9 @@ async function _customize_triggers() {
 
 async function _edit_triggers_implementation() {
   const info = [
-    color('The implementation mode trigger activates Implementation Mode. Once used, the', Colors.CYAN),
-    color('user_messages hook will set Implementation Mode and remind Claude: You are now in', Colors.CYAN),
-    color('Implementation Mode - use tools to execute agreed actions, and return to Discussion', Colors.CYAN),
+    color('The orchestration mode trigger activates Orchestration Mode. Once used, the', Colors.CYAN),
+    color('user_messages hook will set Orchestration Mode and remind Claude: You are now in', Colors.CYAN),
+    color('Orchestration Mode - coordinate and delegate agreed work, and return to Discussion', Colors.CYAN),
     color('Mode immediately when done.', Colors.CYAN), '',
     color('We recommend your trigger phrase be:', Colors.YELLOW),
     color('╔════════════════════════════════════════════════════╗', Colors.YELLOW),
@@ -2235,7 +2237,7 @@ async function _edit_triggers_implementation() {
     const phrase = (await _input('')).trim();
     if (!phrase) break;
     phrases.push(phrase);
-    await ss.editConfig((conf) => { conf.trigger_phrases.implementation_mode.push(phrase); });
+    await ss.editConfig((conf) => { conf.trigger_phrases.orchestration_mode.push(phrase); });
     const added = [color(`✓ Added ${phrases.slice(-5).join(', ')}${phrases.length > 5 ? `... (${phrases.length} total)` : ''}`, Colors.GREEN), ''];
     set_info(info.concat(added));
   }
@@ -2658,7 +2660,7 @@ async function run_config_editor(project_root) {
     let [cfg] = _reload();
     let t = cfg.trigger_phrases;
     let actions = [
-      [`Implementation mode | ${color(_fmt_list(t.implementation_mode), Colors.YELLOW)}`, _edit_triggers_implementation],
+      [`Orchestration mode | ${color(_fmt_list(t.orchestration_mode), Colors.YELLOW)}`, _edit_triggers_implementation],
       [`Discussion mode | ${color(_fmt_list(t.discussion_mode), Colors.YELLOW)}`, _edit_triggers_discussion],
       [`Task creation | ${color(_fmt_list(t.task_creation), Colors.YELLOW)}`, _edit_triggers_task_creation],
       [`Task startup | ${color(_fmt_list(t.task_startup), Colors.YELLOW)}`, _edit_triggers_task_startup],
@@ -2673,7 +2675,7 @@ async function run_config_editor(project_root) {
       if (choice.includes('Back')) break;
       const fn = new Map(actions).get(choice);
       if (fn) {
-        if (choice.includes('Implementation mode')) show_header(print_go_triggers_section);
+        if (choice.includes('Orchestration mode')) show_header(print_go_triggers_section);
         else if (choice.includes('Discussion mode')) show_header(print_no_triggers_section);
         else if (choice.includes('Task creation')) show_header(print_create_section);
         else if (choice.includes('Task startup')) show_header(print_startup_section);
@@ -2683,7 +2685,7 @@ async function run_config_editor(project_root) {
         show_header(print_triggers_header);
       }
       [cfg] = _reload(); t = cfg.trigger_phrases;
-      actions[0] = [`Implementation mode | ${_fmt_list(t.implementation_mode)}`, _edit_triggers_implementation];
+      actions[0] = [`Orchestration mode | ${_fmt_list(t.orchestration_mode)}`, _edit_triggers_implementation];
       actions[1] = [`Discussion mode | ${color(_fmt_list(t.discussion_mode), Colors.YELLOW)}`, _edit_triggers_discussion];
       actions[2] = [`Task creation | ${color(_fmt_list(t.task_creation), Colors.YELLOW)}`, _edit_triggers_task_creation];
       actions[3] = [`Task startup | ${color(_fmt_list(t.task_startup), Colors.YELLOW)}`, _edit_triggers_task_startup];
@@ -2864,6 +2866,59 @@ async function kickstart_decision(project_root) {
 
 ///-///
 
+//!> Ensure piadda-backlog dependency
+const BACKLOG_SPEC = "piadda-backlog @ git+https://github.com/piadda-inc/piadda-backlog.git";
+const PYTHON_BIN = process.env.CC_PYTHON || 'python3';
+
+function ensureBacklogDependency() {
+  console.log(color('📦 Checking piadda-backlog (backlog_md)...', Colors.CYAN));
+
+  // Check if already installed
+  const check = spawnSync(PYTHON_BIN, ['-c', 'import backlog_md'], { stdio: 'ignore' });
+  if (check.status === 0) {
+    console.log(color('✓ piadda-backlog already installed', Colors.GREEN));
+    // Update state to reflect backlog is ready
+    if (ss) {
+      ss.editState((state) => {
+        if (!state.metadata) state.metadata = {};
+        if (!state.metadata.orchestration) state.metadata.orchestration = {};
+        state.metadata.orchestration.backlog_ready = true;
+      });
+    }
+    return true;
+  }
+
+  // Install if missing
+  console.log(color('📥 Installing piadda-backlog...', Colors.CYAN));
+  const install = spawnSync(PYTHON_BIN, ['-m', 'pip', 'install', BACKLOG_SPEC], { stdio: 'inherit' });
+  if (install.status === 0) {
+    console.log(color('✓ Installed piadda-backlog', Colors.GREEN));
+    // Update state to reflect backlog is ready
+    if (ss) {
+      ss.editState((state) => {
+        if (!state.metadata) state.metadata = {};
+        if (!state.metadata.orchestration) state.metadata.orchestration = {};
+        state.metadata.orchestration.backlog_ready = true;
+      });
+    }
+    return true;
+  }
+
+  // Installation failed
+  console.log(color('⚠️  Could not install piadda-backlog automatically.', Colors.YELLOW));
+  console.log(color(`    Run: ${PYTHON_BIN} -m pip install "${BACKLOG_SPEC}"`, Colors.YELLOW));
+  // Update state to reflect backlog is NOT ready
+  if (ss) {
+    ss.editState((state) => {
+      if (!state.metadata) state.metadata = {};
+      if (!state.metadata.orchestration) state.metadata.orchestration = {};
+      state.metadata.orchestration.backlog_ready = false;
+    });
+  }
+  return false;
+}
+//!<
+
 //-//
 
 // ===== ENTRYPOINT ===== //
@@ -2905,6 +2960,9 @@ async function main() {
 
     // Phase: load shared state and initialize defaults
     await setup_shared_state_and_initialize(PROJECT_ROOT);
+
+    // Phase: ensure backlog dependency is installed
+    ensureBacklogDependency();
 
     // Phase: interactive portions under TUI
     const session = tui_session();
@@ -2948,7 +3006,7 @@ async function main() {
       console.log('  1. Create your first task using a trigger:');
       console.log(`     - Task creation: ${color(fmt(t.task_creation), Colors.YELLOW)}`);
       console.log(`     - Task startup:  ${color(fmt(t.task_startup), Colors.YELLOW)}`);
-      console.log(`     - Implementation: ${color(fmt(t.implementation_mode), Colors.YELLOW)}`);
+      console.log(`     - Orchestration: ${color(fmt(t.orchestration_mode), Colors.YELLOW)}`);
       console.log(`     - Discussion:    ${color(fmt(t.discussion_mode), Colors.YELLOW)}`);
       console.log(`     - Completion:    ${color(fmt(t.task_completion), Colors.YELLOW)}`);
       console.log(`     - Compaction:    ${color(fmt(t.context_compaction), Colors.YELLOW)}\n`);

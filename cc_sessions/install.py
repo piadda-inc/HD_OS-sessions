@@ -5,6 +5,7 @@
 ## ===== STDLIB ===== ##
 import shutil, json, sys, os, subprocess, tempfile, contextlib, re, io, builtins
 from pathlib import Path
+from typing import Optional
 from time import sleep
 ##-##
 
@@ -890,7 +891,7 @@ def print_triggers_header() -> None:
     print()
 #!<
 
-#!> Implementation mode triggers section
+#!> Orchestration mode triggers section
 def print_go_triggers_section() -> None:
     print()
     print(color('╔══════════════════════════════════════════════════════════════════════════╗',Colors.GREEN))
@@ -900,7 +901,7 @@ def print_go_triggers_section() -> None:
     print(color('║   ██║  ██║╚══╝██║██╔═══╝ ██║     ██╔══╝ ██║╚══╝██║██╔══╝ ██╔████║  ██║   ║',Colors.GREEN))
     print(color('║ ██████╗██║    ██║██║     ███████╗██████╗██║    ██║██████╗██║╚███║  ██║   ║',Colors.GREEN))
     print(color('║ ╚═════╝╚═╝    ╚═╝╚═╝     ╚══════╝╚═════╝╚═╝    ╚═╝╚═════╝╚═╝ ╚══╝  ╚═╝   ║',Colors.GREEN))
-    print(color('╚════════════ activate implementation mode (claude can code) ══════════════╝',Colors.GREEN))
+    print(color('╚════════════ activate orchestration mode (coordinate & delegate) ═════════╝',Colors.GREEN))
     print()
     print()
 #!<
@@ -1103,7 +1104,9 @@ def create_directory_structure(project_root):
         'sessions/hooks',
         'sessions/api',
         'sessions/protocols',
-        'sessions/knowledge'
+        'sessions/knowledge',
+        'backlog',
+        'backlog/tasks'
     ]
 
     for dir_name in dirs:
@@ -2085,6 +2088,122 @@ def setup_shared_state_and_initialize(project_root):
         print(color('You may need to initialize them manually on first run', Colors.YELLOW))
 #!<
 
+#!> Graphiti detection + memory prompt
+def detect_graphiti(project_root: Path) -> Optional[str]:
+    """Best-effort detection of the graphiti_local executable."""
+    path_candidates: list[Optional[Path | str]] = [
+        shutil.which("graphiti_local"),
+        shutil.which("graphiti-local"),
+    ]
+    local_dir = project_root / "local"
+    manual_paths = [
+        local_dir / "graphiti_local",
+        local_dir / "graphiti_local.py",
+        local_dir / "bin" / "graphiti_local",
+        project_root / "graphiti_local" / "graphiti_local.py",
+        project_root / "graphiti_local.py",
+    ]
+    path_candidates.extend(manual_paths)
+    for candidate in path_candidates:
+        if not candidate:
+            continue
+        if isinstance(candidate, str):
+            return candidate
+        candidate_path = Path(candidate).expanduser()
+        if candidate_path.exists():
+            return str(candidate_path)
+    return None
+
+
+def prompt_memory_setup(project_root: Path) -> None:
+    """Interactive prompt for configuring optional Graphiti memory integration."""
+    if not ss:
+        return
+    try:
+        config = ss.load_config()
+    except Exception:
+        return
+
+    detected_path = detect_graphiti(project_root)
+    current_memory = getattr(config, "memory", None)
+    current_enabled = bool(getattr(current_memory, "enabled", False))
+    current_path = (getattr(current_memory, "graphiti_path", "") or "").strip()
+    default_path = current_path or detected_path or "graphiti_local"
+
+    info_lines = [
+        color("📚 Graphiti memory keeps a searchable history of tasks across sessions.", Colors.CYAN),
+        color("    • SessionStart searches previous work for relevant context", Colors.CYAN),
+        color("    • Task completion episodes (and subagents) can auto-save reflections", Colors.CYAN),
+    ]
+    if detected_path:
+        info_lines.append(color(f"    • Detected graphiti_local at: {detected_path}", Colors.GREEN))
+    else:
+        info_lines.append(color("    • graphiti_local executable not detected automatically", Colors.YELLOW))
+    info_lines.append("")
+    set_info(info_lines)
+
+    choices = ['Enable Graphiti memory', 'Skip for now']
+    default_choice = choices[0] if current_enabled else choices[1]
+    try:
+        choice = inquirer.list_input(
+            message=fmt_msg("Configure Graphiti memory integration?"),
+            choices=choices,
+            default=default_choice,
+        )
+    except Exception:
+        clear_info()
+        return
+
+    if 'Skip' in choice:
+        clear_info()
+        with ss.edit_config() as cfg:
+            cfg.memory.enabled = False
+        print(color('ℹ️  Memory integration skipped. You can enable it later via `sessions config edit`.', Colors.CYAN))
+        return
+
+    try:
+        path_input = input(fmt_msg(f"Path to graphiti_local executable [{default_path}]: ") + " ") or default_path
+    except Exception:
+        path_input = default_path
+
+    try:
+        auto_search_choice = inquirer.list_input(
+            message=fmt_msg("Search memory automatically on SessionStart?"),
+            choices=['Yes', 'No'],
+            default='Yes' if getattr(current_memory, "auto_search", True) else 'No',
+        )
+    except Exception:
+        auto_search_choice = 'Yes' if getattr(current_memory, "auto_search", True) else 'No'
+
+    store_options = {
+        'Off (manual only)': 'off',
+        'On task completion': 'task-completion',
+        'On subagent completion': 'subagent',
+        'Both task + subagent': 'both',
+    }
+    reverse_store = {v: k for k, v in store_options.items()}
+    default_store_label = reverse_store.get(getattr(current_memory, "auto_store", "off"), 'Off (manual only)')
+    try:
+        store_choice = inquirer.list_input(
+            message=fmt_msg("When should sessions auto-store episodes?"),
+            choices=list(store_options.keys()),
+            default=default_store_label,
+        )
+    except Exception:
+        store_choice = default_store_label
+
+    graphiti_target = path_input.strip() or default_path
+    clear_info()
+    with ss.edit_config() as cfg:
+        cfg.memory.enabled = True
+        cfg.memory.provider = "graphiti"
+        cfg.memory.graphiti_path = graphiti_target
+        cfg.memory.auto_search = auto_search_choice == 'Yes'
+        cfg.memory.auto_store = store_options.get(store_choice, 'off')
+
+    print(color(f"✅ Memory enabled using {graphiti_target}", Colors.GREEN))
+#!<
+
 #!> Kickstart cleanup
 def kickstart_cleanup(project_root):
     """Delete kickstart files when user skips onboarding, with TUI-friendly info output."""
@@ -2289,10 +2408,10 @@ def _ask_shell():
 
 #!> Blocked actions
 def _edit_bash_read_patterns():
-    info = [    color("In Discussion mode, Claude can only use read-like tools (including commands in", Colors.CYAN),
+    info = [    color("In Discussion mode, Claude can only use read-only tools (including commands in", Colors.CYAN),
                 color("the Bash tool).", Colors.CYAN),
                 color("To do this, we parse Claude's Bash tool input in Discussion mode to check for", Colors.CYAN),
-                color("write-like and read-only bash commands from a known list.", Colors.CYAN), "",
+                color("commands that modify state vs read-only commands from a known list.", Colors.CYAN), "",
                 "You might have some CLI commands that you want to mark as \"safe\" to use in Discussion mode.",
                 "For reference, here are the commands we already auto-approve in Discussion mode:",
                 color(', '.join(['cat', 'ls', 'pwd', 'cd', 'echo', 'grep', 'find', 'git status', 'git log']), Colors.YELLOW),
@@ -2381,7 +2500,7 @@ def _customize_triggers() -> bool:
                 color("phrases that automatically activate the 4 protocols and 2 driving modes in",Colors.CYAN),
                 color("cc-sessions:",Colors.CYAN),
                 color("╔══════════════════════════════════════════════════════╗", Colors.YELLOW),
-                f"{color('║',Colors.YELLOW)}  • Switch to implementation mode {yert_text}   {color('║',Colors.YELLOW)}",
+                f"{color('║',Colors.YELLOW)}  • Switch to orchestration mode {yert_text}    {color('║',Colors.YELLOW)}",
                 f"{color('║',Colors.YELLOW)}  • Switch to discussion mode {silence_text}    {color('║',Colors.YELLOW)}",
                 f"{color('║',Colors.YELLOW)}  • Create a new task/task file {mek_text}     {color('║',Colors.YELLOW)}",
                 f"{color('║',Colors.YELLOW)}  • Start a task/task file {start_text}       {color('║',Colors.YELLOW)}",
@@ -2394,7 +2513,7 @@ def _customize_triggers() -> bool:
     with ss.edit_config() as conf:
         tp = conf.trigger_phrases
         # Only set defaults if lists are empty
-        if not getattr(tp, 'implementation_mode', None): tp.implementation_mode = ['yert']
+        if not getattr(tp, 'orchestration_mode', None): tp.orchestration_mode = ['yert']
         if not getattr(tp, 'discussion_mode', None): tp.discussion_mode = ['SILENCE']
         if not getattr(tp, 'task_creation', None): tp.task_creation = ['mek:']
         if not getattr(tp, 'task_startup', None): tp.task_startup = ['start^:']
@@ -2404,9 +2523,9 @@ def _customize_triggers() -> bool:
 
 
 def _edit_triggers_implementation():
-    info = [    color("The implementation mode trigger is used when Claude proposes todos for", Colors.CYAN),
-                color("implementation that you agree with. Once used, the user_messages hook will", Colors.CYAN),
-                color("automatically switch the mode to Implementation, notify Claude, and lock in the", Colors.CYAN),
+    info = [    color("The orchestration mode trigger is used when Claude proposes todos for", Colors.CYAN),
+                color("coordinating work that you agree with. Once used, the user_messages hook will", Colors.CYAN),
+                color("automatically switch the mode to Orchestration, notify Claude, and lock in the", Colors.CYAN),
                 color("proposed todo list to ensure Claude doesn't go rogue.", Colors.CYAN), "",
                 color("╔════════════════════════════════════════════════════╗", Colors.YELLOW),
                 f"{color('║', Colors.YELLOW)}  To add your own custom trigger phrase, think of   {color('║', Colors.YELLOW)}",
@@ -2426,7 +2545,7 @@ def _edit_triggers_implementation():
         phrase = input().strip()
         if not phrase: break
         phrases.append(phrase)
-        with ss.edit_config() as conf: conf.trigger_phrases.implementation_mode.append(phrase)
+        with ss.edit_config() as conf: conf.trigger_phrases.orchestration_mode.append(phrase)
         added = [color(f"✓ Added {', '.join([p for p in phrases[-5:]])}{f'... ({len(phrases)} total)' if (len(phrases) > 5) else ''}", Colors.GREEN), ""]
         updated_info = info + added
         set_info(updated_info)
@@ -2845,7 +2964,7 @@ def run_config_editor(project_root):
     def _triggers_menu():
         show_header(print_triggers_header)
         cfg, _ = _reload(); t = cfg.trigger_phrases
-        actions = [ (f"Implementation mode | {color(_fmt_list(t.implementation_mode),Colors.YELLOW)}", _edit_triggers_implementation),
+        actions = [ (f"Orchestration mode | {color(_fmt_list(t.orchestration_mode),Colors.YELLOW)}", _edit_triggers_implementation),
                     (f"Discussion mode | {color(_fmt_list(t.discussion_mode),Colors.YELLOW)}", _edit_triggers_discussion),
                     (f"Task creation | {color(_fmt_list(t.task_creation),Colors.YELLOW)}", _edit_triggers_task_creation),
                     (f"Task startup | {color(_fmt_list(t.task_startup),Colors.YELLOW)}", _edit_triggers_task_startup),
@@ -2858,7 +2977,7 @@ def run_config_editor(project_root):
             if 'Back' in choice: break
             fn = dict(actions).get(choice)
             if fn:
-                if 'Implementation mode' in choice: show_header(print_go_triggers_section)
+                if 'Orchestration mode' in choice: show_header(print_go_triggers_section)
                 elif 'Discussion mode' in choice: show_header(print_no_triggers_section)
                 elif 'Task creation' in choice: show_header(print_create_section)
                 elif 'Task startup' in choice: show_header(print_startup_section)
@@ -2867,7 +2986,7 @@ def run_config_editor(project_root):
                 fn()
                 show_header(print_triggers_header)
             cfg, _ = _reload(); t = cfg.trigger_phrases
-            actions[0] = (f"Implementation mode | {_fmt_list(t.implementation_mode)}", _edit_triggers_implementation)
+            actions[0] = (f"Orchestration mode | {_fmt_list(t.orchestration_mode)}", _edit_triggers_implementation)
             actions[1] = (f"Discussion mode | {color(_fmt_list(t.discussion_mode),Colors.YELLOW)}", _edit_triggers_discussion)
             actions[2] = (f"Task creation | {color(_fmt_list(t.task_creation),Colors.YELLOW)}", _edit_triggers_task_creation)
             actions[3] = (f"Task startup | {color(_fmt_list(t.task_startup),Colors.YELLOW)}", _edit_triggers_task_startup)
@@ -3051,6 +3170,55 @@ def kickstart_decision(project_root: Path) -> str:
     return 'skip'
 ##-##
 
+#!> Ensure piadda-backlog dependency
+BACKLOG_SPEC = "piadda-backlog @ git+https://github.com/piadda-inc/piadda-backlog.git"
+
+def ensure_backlog_dependency() -> bool:
+    """Check if piadda-backlog is installed, install if missing, update state metadata."""
+    print(color("📦 Checking piadda-backlog (backlog_md)...", Colors.CYAN))
+
+    try:
+        import backlog_md  # noqa: F401
+        print(color("✓ piadda-backlog already installed", Colors.GREEN))
+        # Update state to reflect backlog is ready
+        if ss:
+            with ss.edit_state() as state:
+                if not state.metadata:
+                    state.metadata = {}
+                if 'orchestration' not in state.metadata:
+                    state.metadata['orchestration'] = {}
+                state.metadata['orchestration']['backlog_ready'] = True
+        return True
+    except ModuleNotFoundError:
+        print(color("📥 Installing piadda-backlog...", Colors.CYAN))
+        cmd = [sys.executable, "-m", "pip", "install", BACKLOG_SPEC]
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        if result.returncode == 0:
+            print(color("✓ Installed piadda-backlog", Colors.GREEN))
+            # Update state to reflect backlog is ready
+            if ss:
+                with ss.edit_state() as state:
+                    if not state.metadata:
+                        state.metadata = {}
+                    if 'orchestration' not in state.metadata:
+                        state.metadata['orchestration'] = {}
+                    state.metadata['orchestration']['backlog_ready'] = True
+            return True
+        else:
+            print(color("⚠️  Failed to install piadda-backlog automatically.", Colors.YELLOW))
+            print(color(f"    Run manually: {' '.join(cmd)}", Colors.YELLOW))
+            print(color(f"    Error: {result.stderr[:200]}", Colors.YELLOW))
+            # Update state to reflect backlog is NOT ready
+            if ss:
+                with ss.edit_state() as state:
+                    if not state.metadata:
+                        state.metadata = {}
+                    if 'orchestration' not in state.metadata:
+                        state.metadata['orchestration'] = {}
+                    state.metadata['orchestration']['backlog_ready'] = False
+            return False
+#!<
+
 #-#
 
 # ===== ENTRYPOINT ===== #
@@ -3091,6 +3259,9 @@ def main():
         # Phase: load shared state and initialize defaults
         setup_shared_state_and_initialize(PROJECT_ROOT)
 
+        # Phase: ensure backlog dependency is installed
+        ensure_backlog_dependency()
+
         # Phase: interactive portions under TUI
         with tui_session():
             # Decision point (import vs full config)
@@ -3099,6 +3270,8 @@ def main():
             # Configuration
             if did_import: run_config_editor(PROJECT_ROOT) # tweak imported settings
             else: run_full_configuration()
+
+            prompt_memory_setup(PROJECT_ROOT)
 
             # Kickstart decision
             kickstart_mode = kickstart_decision(PROJECT_ROOT)
@@ -3136,7 +3309,7 @@ def main():
             print('  1. Create your first task using a trigger:')
             print(f"     - Task creation: {color(_fmt(getattr(t, 'task_creation', None)), Colors.YELLOW)}")
             print(f"     - Task startup:  {color(_fmt(getattr(t, 'task_startup', None)), Colors.YELLOW)}")
-            print(f"     - Implementation: {color(_fmt(getattr(t, 'implementation_mode', None)), Colors.YELLOW)}")
+            print(f"     - Orchestration: {color(_fmt(getattr(t, 'orchestration_mode', None)), Colors.YELLOW)}")
             print(f"     - Discussion:    {color(_fmt(getattr(t, 'discussion_mode', None)), Colors.YELLOW)}")
             print(f"     - Completion:    {color(_fmt(getattr(t, 'task_completion', None)), Colors.YELLOW)}")
             print(f"     - Compaction:    {color(_fmt(getattr(t, 'context_compaction', None)), Colors.YELLOW)}\n")

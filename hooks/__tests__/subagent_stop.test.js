@@ -118,6 +118,7 @@ save_execution_plan(plan, execution_plan_path)
     if (result.status !== 0) {
         throw new Error(result.stderr || 'Failed to seed orchestration state');
     }
+    console.error(`[seed] state_dir=${stateDir}`);
 }
 
 function buildPayload(overrides = {}) {

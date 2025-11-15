@@ -13,6 +13,7 @@ const https = require('https');
 
 /// ===== LOCAL ===== ///
 const { editState, PROJECT_ROOT, loadConfig, SessionsProtocol, getTaskFilePath, isDirectoryTask } = require('./shared_state.js');
+const { getClient } = require('../lib/memory');
 ///-///
 
 //-//
@@ -21,6 +22,7 @@ const { editState, PROJECT_ROOT, loadConfig, SessionsProtocol, getTaskFilePath, 
 const sessionsDir = path.join(PROJECT_ROOT, 'sessions');
 let STATE = null;
 const CONFIG = loadConfig();
+const MEMORY_CLIENT = getClient(CONFIG.memory);
 const developerName = CONFIG.environment?.developer_name || 'developer';
 
 // Initialize context
@@ -335,6 +337,32 @@ function listOpenTasksGrouped() {
     return output;
 }
 
+async function renderMemoryContext(taskTitle) {
+    if (!taskTitle || !CONFIG.memory?.enabled || !CONFIG.memory.auto_search || !MEMORY_CLIENT.canSearch) {
+        return '';
+    }
+    try {
+        const results = await MEMORY_CLIENT.searchMemory(taskTitle);
+        if (!results || results.length === 0) {
+            return '';
+        }
+        const maxResults = CONFIG.memory.max_results ?? 5;
+        let block = '\n## 📚 Relevant Memory\n';
+        for (const fact of results.slice(0, maxResults)) {
+            const text = typeof fact === 'string' ? fact : (fact.fact || '');
+            const source = typeof fact === 'object' ? fact.episode_name : undefined;
+            block += `- ${text}\n`;
+            if (source) {
+                block += `  (from: ${source})\n`;
+            }
+        }
+        block += '\n';
+        return block;
+    } catch {
+        return '';
+    }
+}
+
 //-//
 
 // ===== EXECUTION ===== //
@@ -432,8 +460,8 @@ Based on the task requirements, I propose the following implementation:
 □ [Specific action 3]
   → [Expanded explanation of what this involves]
 
-To approve these todos, you may use any of your implementation mode trigger phrases:
-${JSON.stringify(CONFIG.trigger_phrases.implementation_mode)}
+To approve these todos, you may use any of your orchestration mode trigger phrases:
+${JSON.stringify(CONFIG.trigger_phrases.orchestration_mode)}
 \`\`\`
 
 3. Iterate based on user feedback until approved
@@ -450,8 +478,13 @@ Once approved, remember:
 - Work logs are maintained by the logging agent (not manually)
 
 After completion of the last task in any todo list:
-- *Do not* try to run any write-based tools (you will be automatically put into discussion mode)
-- Repeat todo proposal and approval workflow for any additional write/edit-based work`;
+- *Do not* try to run any tools (you will be automatically put into discussion mode)
+- Repeat todo proposal and approval workflow for any additional work`;
+
+        const memoryBlock = await renderMemoryContext(STATE.current_task.name || STATE.current_task.file);
+        if (memoryBlock) {
+            context += memoryBlock;
+        }
     } else {
         context += listOpenTasksGrouped();
     }

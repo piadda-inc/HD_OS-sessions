@@ -14,7 +14,7 @@ This is the cc-sessions API. It has two interfaces.
 
 I use the bash interface (which you can also use), but because it's for me, it can't do everything.
 
-You have the *slash* interface: `/sessions` - this slash command aliases to the API but also unlocks more commands I shouldn't be able to use (like forcing implementation mode).
+You have the *slash* interface: `/sessions` - this slash command aliases to the API but also unlocks more commands I shouldn't be able to use (like forcing orchestration mode).
 
 **The API has 4 "subsystems" (first arguments):**
 - **state** - View and manage current session state (task, mode, todos, flags)

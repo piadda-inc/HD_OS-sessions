@@ -169,13 +169,12 @@ function handlePhrasesCommand(args, jsonOutput = false, fromSlash = false) {
 
     const action = args[0].toLowerCase();
 
-    // Map friendly category names for slash commands
+    // Map friendly category names (supports both slash commands and direct API calls)
     function mapCategory(cat) {
-        if (!fromSlash) {
-            return cat;
-        }
         const mapping = {
-            'go': 'implementation_mode',
+            'go': 'orchestration_mode',
+            'implementation': 'orchestration_mode',  // Backward compatibility alias
+            'implementation_mode': 'orchestration_mode',  // Direct API alias
             'no': 'discussion_mode',
             'create': 'task_creation',
             'start': 'task_startup',
@@ -213,7 +212,7 @@ function handlePhrasesCommand(args, jsonOutput = false, fromSlash = false) {
         const category = mapCategory(args[1]);
 
         // Check for valid category
-        const validCategories = ['implementation_mode', 'discussion_mode', 'task_creation', 'task_startup', 'task_completion', 'context_compaction'];
+        const validCategories = ['orchestration_mode', 'discussion_mode', 'task_creation', 'task_startup', 'task_completion', 'context_compaction'];
         if (!validCategories.includes(category)) {
             if (fromSlash) {
                 return `Invalid category '${args[1]}'\nValid categories: go, no, create, start, complete, compact\n\nUse '/sessions config trigger help' for more info`;
@@ -256,7 +255,7 @@ function handlePhrasesCommand(args, jsonOutput = false, fromSlash = false) {
         const category = mapCategory(args[1]);
 
         // Check for valid category
-        const validCategories = ['implementation_mode', 'discussion_mode', 'task_creation', 'task_startup', 'task_completion', 'context_compaction'];
+        const validCategories = ['orchestration_mode', 'discussion_mode', 'task_creation', 'task_startup', 'task_completion', 'context_compaction'];
         if (!validCategories.includes(category)) {
             if (fromSlash) {
                 return `Invalid category '${args[1]}'\nValid categories: go, no, create, start, complete, compact\n\nUse '/sessions config trigger help' for more info`;
@@ -339,12 +338,15 @@ function formatPhrasesHelp() {
         "  /sessions config trigger remove <category> <phrase> - Remove trigger phrase",
         "",
         "Categories:",
-        "  go       - implementation_mode triggers (yert, make it so, run that)",
+        "  go       - orchestration_mode triggers (yert, make it so, run that)",
         "  no       - discussion_mode triggers (stop, silence)",
         "  create   - task_creation triggers (mek:, mekdis)",
         "  start    - task_startup triggers (start^, begin task:)",
         "  complete - task_completion triggers (finito)",
-        "  compact  - context_compaction triggers (lets compact, squish)"
+        "  compact  - context_compaction triggers (lets compact, squish)",
+        "",
+        "Legacy aliases:",
+        "  implementation_mode / implementation -> orchestration_mode (backward compatibility)"
     ];
     return lines.join('\n');
 }
@@ -1311,8 +1313,8 @@ function validateConfig(jsonOutput = false) {
         }
 
         // Check for at least one implementation trigger phrase
-        if (!config.trigger_phrases.implementation_mode || config.trigger_phrases.implementation_mode.length === 0) {
-            issues.push("No implementation mode trigger phrases defined");
+        if (!config.trigger_phrases.orchestration_mode || config.trigger_phrases.orchestration_mode.length === 0) {
+            issues.push("No orchestration mode trigger phrases defined");
         }
 
         if (issues.length > 0) {

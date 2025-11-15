@@ -44,12 +44,12 @@ const CONFIG_FILE = path.join(PROJECT_ROOT, 'sessions', 'sessions-config.json');
 
 // Mode description strings
 const DISCUSSION_MODE_MSG = "You are now in Discussion Mode and should focus on discussing and investigating with the user (no edit-based tools)";
-const IMPLEMENTATION_MODE_MSG = "You are now in Implementation Mode and may use tools to execute the agreed upon actions - when you are done return immediately to Discussion Mode";
+const ORCHESTRATION_MODE_MSG = "You are now in Orchestration Mode and may use tools to coordinate and delegate work - when you are done return immediately to Discussion Mode";
 
 // ==== ENUMS ===== //
 
 const TriggerCategory = {
-    IMPLEMENTATION_MODE: 'implementation_mode',
+    ORCHESTRATION_MODE: 'orchestration_mode',
     DISCUSSION_MODE: 'discussion_mode',
     TASK_CREATION: 'task_creation',
     TASK_STARTUP: 'task_startup',
@@ -116,7 +116,7 @@ const SessionsProtocol = {
 
 const Mode = {
     NO: 'discussion',
-    GO: 'implementation'
+    GO: 'orchestration'
 };
 
 const TodoStatus = {
@@ -135,7 +135,11 @@ const Model = {
 
 class TriggerPhrases {
     constructor(data = {}) {
-        this.implementation_mode = data.implementation_mode || ['yert'];
+        // Handle backward compatibility: "implementation_mode" → "orchestration_mode"
+        // Prefer new key if both exist, fallback to old key if only old exists
+        this.orchestration_mode = data.orchestration_mode ||
+                                   data.implementation_mode ||
+                                   ['yert'];
         this.discussion_mode = data.discussion_mode || ['SILENCE'];
         this.task_creation = data.task_creation || ['mek:'];
         this.task_startup = data.task_startup || ['start^'];
@@ -143,15 +147,20 @@ class TriggerPhrases {
         this.context_compaction = data.context_compaction || ['squish'];
     }
 
+    // Backward compatibility getter for old code
+    get implementation_mode() {
+        return this.orchestration_mode;
+    }
+
     _coaxPhraseType(phraseType) {
         const mapping = {
-            'implement': TriggerCategory.IMPLEMENTATION_MODE,
+            'implement': TriggerCategory.ORCHESTRATION_MODE,
             'discuss': TriggerCategory.DISCUSSION_MODE,
             'create': TriggerCategory.TASK_CREATION,
             'start': TriggerCategory.TASK_STARTUP,
             'complete': TriggerCategory.TASK_COMPLETION,
             'compact': TriggerCategory.CONTEXT_COMPACTION,
-            'implementation_mode': TriggerCategory.IMPLEMENTATION_MODE,
+            'orchestration_mode': TriggerCategory.ORCHESTRATION_MODE,
             'discussion_mode': TriggerCategory.DISCUSSION_MODE,
             'task_creation': TriggerCategory.TASK_CREATION,
             'task_startup': TriggerCategory.TASK_STARTUP,
@@ -350,6 +359,38 @@ class EnabledFeatures {
     }
 }
 
+class MemoryConfig {
+    constructor(data = {}) {
+        this.enabled = data.enabled ?? false;
+        this.provider = data.provider || 'graphiti';
+        this.graphiti_path = data.graphiti_path || '';
+        this.auto_search = data.auto_search !== undefined ? data.auto_search : true;
+        this.auto_store = data.auto_store || 'off';
+        this.search_timeout_ms = data.search_timeout_ms ?? 1500;
+        this.store_timeout_s = data.store_timeout_s ?? 2.0;
+        this.max_results = data.max_results ?? 5;
+        this.group_id = data.group_id || 'hd_os_workspace';
+        this.allow_code_snippets = data.allow_code_snippets !== undefined ? data.allow_code_snippets : true;
+        this.sanitize_secrets = data.sanitize_secrets !== undefined ? data.sanitize_secrets : true;
+    }
+
+    toDict() {
+        return {
+            enabled: this.enabled,
+            provider: this.provider,
+            graphiti_path: this.graphiti_path,
+            auto_search: this.auto_search,
+            auto_store: this.auto_store,
+            search_timeout_ms: this.search_timeout_ms,
+            store_timeout_s: this.store_timeout_s,
+            max_results: this.max_results,
+            group_id: this.group_id,
+            allow_code_snippets: this.allow_code_snippets,
+            sanitize_secrets: this.sanitize_secrets
+        };
+    }
+}
+
 class SessionsConfig {
     constructor(data = {}) {
         this.trigger_phrases = new TriggerPhrases(data.trigger_phrases);
@@ -357,6 +398,7 @@ class SessionsConfig {
         this.git_preferences = new GitPreferences(data.git_preferences);
         this.environment = new SessionsEnv(data.environment);
         this.features = EnabledFeatures.fromDict(data.features);
+        this.memory = new MemoryConfig(data.memory);
     }
 
     static fromDict(data) {
@@ -378,7 +420,8 @@ class SessionsConfig {
                     warn_85: this.features.context_warnings.warn_85,
                     warn_90: this.features.context_warnings.warn_90
                 }
-            }
+            },
+            memory: this.memory.toDict()
         };
     }
 }
@@ -676,12 +719,18 @@ class SessionsState {
                           (flagsData.context_warnings && flagsData.context_warnings['90%']) ||
                           false;
 
+        // Handle mode with backward compatibility for "implementation" → "orchestration"
+        let mode = data.mode || Mode.NO;
+        if (mode === 'implementation') {
+            mode = 'orchestration';  // Auto-migrate old value
+        }
+
         const state = new SessionsState();
         state.version = data.version || pkgVersion;
         state.current_task = new TaskState(data.current_task || {});
         state.active_protocol = activeProtocol;
         state.api = apiPerms;
-        state.mode = data.mode || Mode.NO;
+        state.mode = mode;
         state.todos = new SessionsTodos({});
         state.todos.active = activeTodos;
         state.todos.stashed = stashedTodos;
@@ -1189,6 +1238,16 @@ function loadConfig() {
             needsMigration = true;
         }
 
+        // Check if migration is needed from implementation_mode to orchestration_mode
+        if (data.trigger_phrases && 'implementation_mode' in data.trigger_phrases) {
+            needsMigration = true;
+            // Remove old key from data before creating config
+            if (!data.trigger_phrases.orchestration_mode) {
+                data.trigger_phrases.orchestration_mode = data.trigger_phrases.implementation_mode;
+            }
+            delete data.trigger_phrases.implementation_mode;
+        }
+
         const config = SessionsConfig.fromDict(data);
 
         // If migration happened, write back the config to remove old field
@@ -1454,7 +1513,7 @@ module.exports = {
     LOCK_DIR,
     CONFIG_FILE,
     DISCUSSION_MODE_MSG,
-    IMPLEMENTATION_MODE_MSG,
+    ORCHESTRATION_MODE_MSG,
 
     // Enums
     TriggerCategory,

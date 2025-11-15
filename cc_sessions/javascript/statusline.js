@@ -12,6 +12,53 @@ const path = require('path');
 const { execSync } = require('child_process');
 const { loadState, editState, loadConfig, Mode, Model, IconStyle, PROJECT_ROOT } = require(path.join(process.env.CLAUDE_PROJECT_DIR, 'sessions', 'hooks', 'shared_state.js'));
 
+/**
+ * Count backlog tasks by status
+ * Returns { todo: N, in_progress: N, done: N, total: N }
+ */
+function getBacklogStats(cwd) {
+    const backlogPath = path.join(cwd, 'backlog', 'tasks');
+
+    if (!fs.existsSync(backlogPath)) {
+        return null;
+    }
+
+    const stats = { todo: 0, in_progress: 0, done: 0, total: 0 };
+
+    try {
+        const files = fs.readdirSync(backlogPath).filter(f => f.endsWith('.md'));
+
+        for (const file of files) {
+            const filePath = path.join(backlogPath, file);
+            const content = fs.readFileSync(filePath, 'utf-8');
+
+            // Parse YAML frontmatter
+            const match = content.match(/^---\n([\s\S]*?)\n---/);
+            if (match) {
+                const frontmatter = match[1];
+                const statusMatch = frontmatter.match(/status:\s*["']?([^"'\n]+)["']?/i);
+
+                if (statusMatch) {
+                    const status = statusMatch[1].trim().toLowerCase();
+                    stats.total++;
+
+                    if (status === 'to do' || status === 'todo' || status === 'pending') {
+                        stats.todo++;
+                    } else if (status === 'in progress' || status === 'in-progress' || status === 'inprogress') {
+                        stats.in_progress++;
+                    } else if (status === 'done' || status === 'completed') {
+                        stats.done++;
+                    }
+                }
+            }
+        }
+
+        return stats;
+    } catch (err) {
+        return null;
+    }
+}
+
 // ANSI color detection for Windows
 function supportsAnsi() {
     /**
@@ -370,11 +417,14 @@ function main() {
         }
     }
 
-    // Current task
+    // Backlog statistics (prioritize over sessions task)
+    const backlogStats = getBacklogStats(cwd);
+
+    // Current task (fallback if no backlog)
     const currTask = state?.current_task?.name || null;
 
     // Current mode
-    const currMode = state?.mode === Mode.GO ? 'Implementation' : 'Discussion';
+    const currMode = state?.mode === Mode.GO ? 'Orchestration' : 'Discussion';
     let modeIcon;
     if (iconStyle === IconStyle.NERD_FONTS) {
         modeIcon = state?.mode === Mode.GO ? '󰷫 ' : '󰭹 ';
@@ -434,9 +484,22 @@ function main() {
     } else {  // ASCII
         taskIcon = 'Task: ';
     }
-    const taskPart = currTask ?
-        `${cyan}${taskIcon}${currTask}${reset}` :
-        `${cyan}${taskIcon}${gray}No Task${reset}`;
+    let taskPart;
+    if (backlogStats && backlogStats.total > 0) {
+        // Show backlog stats: "📋 3 todo | 2 active | 5 done"
+        const parts = [];
+        if (backlogStats.todo > 0) parts.push(`${backlogStats.todo} todo`);
+        if (backlogStats.in_progress > 0) parts.push(`${backlogStats.in_progress} active`);
+        if (backlogStats.done > 0) parts.push(`${backlogStats.done} done`);
+
+        const statsText = parts.length > 0 ? parts.join(' | ') : `${backlogStats.total} tasks`;
+        taskPart = `${cyan}${taskIcon}${statsText}${reset}`;
+    } else if (currTask) {
+        // Fallback to sessions task
+        taskPart = `${cyan}${taskIcon}${currTask}${reset}`;
+    } else {
+        taskPart = `${cyan}${taskIcon}${gray}No Tasks${reset}`;
+    }
     console.log(contextPart + ' | ' + taskPart);
 
     // Line 2 - Mode | Edited & Uncommitted with upstream | Open Tasks | Git branch

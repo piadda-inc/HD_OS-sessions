@@ -56,7 +56,7 @@ HELP_MESSAGES = {
 
     "state": """Available state commands:
   show [section]   - Display state (task, todos, flags, mode)
-  mode <mode>      - Switch mode (discussion/no, bypass/off, implementation/go)
+  mode <mode>      - Switch mode (discussion/no, bypass/off, orchestration/go)
   task <action>    - Manage task (clear, show, restore <file>)
   todos <action>   - Manage todos (clear)
   flags <action>   - Manage flags (clear, clear-context)

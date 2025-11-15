@@ -26,7 +26,7 @@ function formatConfigForDisplay(config) {
     return `**Current Configuration:**
 
 **Trigger Phrases:**
-- Implementation mode: ${config.trigger_phrases.implementation_mode}
+- Orchestration mode: ${config.trigger_phrases.orchestration_mode}
 - Discussion mode: ${config.trigger_phrases.discussion_mode}
 - Task creation: ${config.trigger_phrases.task_creation}
 - Task startup: ${config.trigger_phrases.task_startup}
@@ -205,7 +205,7 @@ function beginKickstart(mode, jsonOutput = false) {
 
 function completeKickstart(jsonOutput = false) {
     /**Exit kickstart mode and clean up files/settings programmatically.*/
-    // Switch to implementation mode if in discussion mode
+    // Switch to orchestration mode if in discussion mode
     if (STATE.mode === Mode.NO) {
         editState(s => { s.mode = Mode.GO; return s; });
     }

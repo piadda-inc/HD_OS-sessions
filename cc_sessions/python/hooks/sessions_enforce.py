@@ -284,7 +284,7 @@ if tool_name == "Bash" and STATE.mode is Mode.NO and not STATE.flags.bypass_mode
         is_windows = platform.system() == "Windows"
         sessions_cmd = "sessions/bin/sessions.bat" if is_windows else "sessions/bin/sessions"
 
-        print(f"[DAIC] Blocked write-like Bash command in Discussion mode. Only the user can activate implementation mode. Explain what you want to do and seek alignment and approval first.\n"
+        print(f"[DAIC] Blocked command that modifies state in Discussion mode. Only the user can activate orchestration mode. Explain what you want to do and seek alignment and approval first.\n"
               f"Note: Both Claude and the user can configure allowed commands:\n"
               f"  - View allowed: {sessions_cmd} config read list\n"
               f"  - Add command: {sessions_cmd} config read add <command>\n"
@@ -333,7 +333,7 @@ if tool_name == "TodoWrite" and not STATE.flags.bypass_mode:
             proposed_display = "\n".join(f"  {i+1}. {name}" for i, name in enumerate(incoming_names))
 
             # Get user's implementation trigger phrases
-            trigger_phrases = CONFIG.trigger_phrases.implementation_mode
+            trigger_phrases = CONFIG.trigger_phrases.orchestration_mode
             trigger_list = ", ".join(f'"{phrase}"' for phrase in trigger_phrases)
 
             # Clear todos and revert to discussion mode (preparing for re-approval)

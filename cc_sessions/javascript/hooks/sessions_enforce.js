@@ -353,7 +353,7 @@ if (toolName === "Bash" && STATE.mode === Mode.NO && !STATE.flags.bypass_mode) {
         const isWindows = process.platform === "win32";
         const sessionsCmd = isWindows ? "sessions/bin/sessions.bat" : "sessions/bin/sessions";
 
-        console.error(`[DAIC] Blocked write-like Bash command in Discussion mode. Only the user can activate implementation mode. Explain what you want to do and seek alignment and approval first.\n` +
+        console.error(`[DAIC] Blocked command that modifies state in Discussion mode. Only the user can activate orchestration mode. Explain what you want to do and seek alignment and approval first.\n` +
                       `Note: Both Claude and the user can configure allowed commands:\n` +
                       `  - View allowed: ${sessionsCmd} config read list\n` +
                       `  - Add command: ${sessionsCmd} config read add <command>\n` +
@@ -411,7 +411,7 @@ if (toolName === "TodoWrite" && !STATE.flags.bypass_mode) {
             const proposedDisplay = incomingNames.map((name, i) => `  ${i+1}. ${name}`).join('\n');
 
             // Get user's implementation trigger phrases
-            const triggerPhrases = CONFIG.trigger_phrases.implementation_mode;
+            const triggerPhrases = CONFIG.trigger_phrases.orchestration_mode;
             const triggerList = triggerPhrases.map(p => `"${p}"`).join(', ');
 
             // Clear todos and revert to discussion mode (preparing for re-approval)

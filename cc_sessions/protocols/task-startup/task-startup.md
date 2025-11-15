@@ -117,8 +117,8 @@ Based on the task requirements, I propose the following implementation:
 □ [Specific action 3]
   → [Expanded explanation of what this involves]
 
-To approve these todos, you may use any of your implementation mode trigger phrases: 
-{implementation_mode_triggers}
+To approve these todos, you may use any of your orchestration mode trigger phrases:
+{orchestration_mode_triggers}
 ```
 
 3. Iterate based on user feedback until approved
@@ -136,8 +136,8 @@ Once approved, remember:
 - Work logs are maintained by the logging agent (not manually)
 
 After completion of the last task in any todo list:
-- *Do not* try to run any write-based tools (you will be automatically put into discussion mode)
-- Repeat todo proposal and approval workflow for any additional write/edit-based work
+- *Do not* try to run any tools (you will be automatically put into discussion mode)
+- Repeat todo proposal and approval workflow for any additional work
 
 ## Example First Message
 

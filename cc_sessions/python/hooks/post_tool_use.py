@@ -8,14 +8,29 @@ import json
 import sys
 import os
 import platform
+from datetime import datetime, timezone
+from uuid import uuid4
+from typing import Any, Dict
+from pathlib import Path
 ##-##
 
 ## ===== 3RD-PARTY ===== ##
 ##-##
 
 ## ===== LOCAL ===== ##
+HOOKS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = HOOKS_DIR.parent
+REPO_PARENT = REPO_ROOT.parent
+DATA_MODULE_DIR = REPO_ROOT / "sessions"
+for candidate in (str(DATA_MODULE_DIR), str(REPO_ROOT), str(REPO_PARENT)):
+    if candidate not in sys.path:
+        sys.path.insert(0, candidate)
+
+from sessions.memory import get_client
+
 from shared_state import (
     load_state,
+    load_config,
     edit_state,
     Mode,
     PROJECT_ROOT,
@@ -24,7 +39,6 @@ from shared_state import (
     TaskState,
     StateError,
 )
-from pathlib import Path
 ##-##
 
 #-#
@@ -54,6 +68,8 @@ cwd = input_data.get("cwd", "")
 mod = False
 
 STATE = load_state()
+CONFIG = load_config()
+MEMORY_CLIENT = get_client(getattr(CONFIG, "memory", None))
 #-#
 
 """
@@ -68,9 +84,47 @@ STATE = load_state()
 Handles post-tool execution cleanup and state management:
 - Cleans up subagent context flags and transcript directories after Task tool completion
 - Auto-returns to discussion mode when all todos are marked complete
-- Enforces todo-based execution boundaries in implementation mode
+- Enforces todo-based execution boundaries in orchestration mode
 - Provides directory navigation feedback after cd commands
 """
+
+
+def _auto_store_enabled(event: str) -> bool:
+    auto_store = (getattr(CONFIG.memory, "auto_store", "off") or "off").lower()
+    if auto_store == "off":
+        return False
+    if auto_store == "both":
+        return True
+    return auto_store == event
+
+
+def _build_episode_payload(tool_input: dict) -> Dict[str, Any]:
+    summary = tool_input.get("summary") or f"Completed task: {STATE.current_task.name or STATE.current_task.file or 'session task'}"
+    objectives = tool_input.get("objectives")
+    if not isinstance(objectives, list):
+        objectives = [t.content for t in STATE.todos.active] if STATE.todos.active else []
+    completed_at = tool_input.get("completed_at") or datetime.now(timezone.utc).isoformat()
+    return {
+        "episode_id": tool_input.get("episode_id") or f"{STATE.current_task.file or 'task'}-{uuid4().hex[:8]}",
+        "workspace_id": getattr(CONFIG.memory, "group_id", "hd_os_workspace"),
+        "task_id": STATE.current_task.file or STATE.current_task.name or f"task-{uuid4().hex[:6]}",
+        "summary": summary,
+        "objectives": objectives,
+        "timestamps": {"completed_at": completed_at},
+    }
+
+
+def maybe_store_task_completion(tool_input: dict) -> bool:
+    if not (
+        getattr(CONFIG.memory, "enabled", False)
+        and getattr(MEMORY_CLIENT, "can_store", False)
+        and _auto_store_enabled("task-completion")
+    ):
+        return False
+    try:
+        return bool(MEMORY_CLIENT.store_episode(_build_episode_payload(tool_input)))
+    except Exception:
+        return False
 
 # ===== EXECUTION ===== #
 
@@ -101,6 +155,7 @@ if STATE.mode is Mode.GO and tool_name == "TodoWrite" and STATE.todos.all_comple
     print("[DAIC: Todos Complete] All todos completed.\n\n", file=sys.stderr)
 
     if STATE.active_protocol is SessionsProtocol.COMPLETE:
+        maybe_store_task_completion(tool_input)
         with edit_state() as s:
             s.mode = Mode.NO
             s.active_protocol = None
@@ -153,8 +208,8 @@ if (
     and not STATE.todos.active
     and STATE.current_task.name
 ):
-    # In implementation mode but no todos - show reminder only during task-based work
-    print("[Reminder] You're in implementation mode without approved todos. "
+    # In orchestration mode but no todos - show reminder only during task-based work
+    print("[Reminder] You're in orchestration mode without approved todos. "
         "If you proposed todos that were approved, add them. "
         "If the user asked you to do something without todo proposal/approval that is **reasonably complex or multi-step**, translate *only the remaining work* to todos and add them (all 'pending'). ", file=sys.stderr,)
     mod = True

@@ -21,7 +21,7 @@ Alright let's prevent me from doing anything crazy - go ahead and use one of you
 ## After user switches back to discussion mode:
 
 SAY TO THE USER >>>
-Alright, I'm back in Discussion mode and write-like tools are once again blocked.
+Alright, I'm back in Discussion mode and tools are once again blocked.
 
 So that's how it works. If you ask me a question, I can't just run off changing a bunch of things. Now questions are questions and instructions are instructions.
 

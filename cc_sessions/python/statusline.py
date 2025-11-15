@@ -219,7 +219,7 @@ Sessions default status line script
 Shows:
 - Context usage progress bar (with Ayu Dark colors)
 - Current task name
-- Current mode (Discussion or Implementation)
+- Current mode (Discussion or Orchestration)
 - Count of edited & uncommitted files in the current git repo
 - Count of open tasks in sessions/tasks (files + dirs)
 """
@@ -372,7 +372,7 @@ curr_task = STATE.current_task.name if STATE else None
 ##-##
 
 ## ===== CURRENT MODE ===== ##
-curr_mode = "Implement" if STATE.mode == Mode.GO else "Discuss"
+curr_mode = "Orchestrate" if STATE.mode == Mode.GO else "Discuss"
 if icon_style == IconStyle.NERD_FONTS:
     mode_icon = "󰷫 " if STATE.mode == Mode.GO else "󰭹 "
 elif icon_style == IconStyle.EMOJI:

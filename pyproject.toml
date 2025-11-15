@@ -37,13 +37,16 @@ classifiers = [
     "Topic :: Software Development :: Quality Assurance",
 ]
 requires-python = ">=3.8"
-dependencies = ["inquirer>=3.0.0"]
+dependencies = [
+    "inquirer>=3.0.0",
+    "piadda-backlog @ git+https://github.com/piadda-inc/piadda-backlog.git",
+]
 
 [project.urls]
-Homepage = "https://github.com/GWUDCAP/cc-sessions"
-Documentation = "https://github.com/GWUDCAP/cc-sessions#readme"
-Repository = "https://github.com/GWUDCAP/cc-sessions.git"
-Issues = "https://github.com/GWUDCAP/cc-sessions/issues"
+Homepage = "https://github.com/piadda-inc/HD_OS-sessions"
+Documentation = "https://github.com/piadda-inc/HD_OS-sessions#readme"
+Repository = "https://github.com/piadda-inc/HD_OS-sessions.git"
+Issues = "https://github.com/piadda-inc/HD_OS-sessions/issues"
 
 [project.scripts]
 cc-sessions = "cc_sessions.install:main"
