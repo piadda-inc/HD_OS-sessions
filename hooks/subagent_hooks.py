@@ -161,8 +161,8 @@ This module handles PreToolUse processing for the Task tool:
 
 # ===== EXECUTION ===== #
 
-#!> Set subagent flag
-with edit_state() as s: s.flags.subagent = True; STATE = s
+#!> Set subagent flag with session tracking
+with edit_state() as s: s.flags.set_subagent(session_id); STATE = s
 #!<
 
 #!> Trunc + clean transcript

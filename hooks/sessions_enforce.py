@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
 
+# NOTE: This Python version does NOT include the Task orchestration gate or
+# subagent flag self-healing logic that exists in sessions_enforce.js.
+# The JS version is used by default (see .claude/settings.json hooks config).
+# If Python enforcement is needed, the Task gate from sessions_enforce.js
+# lines 1022-1090 should be ported here. See also: SessionsFlags.is_subagent_stale()
+# in shared_state.py which is currently unused by this file.
+
 # ===== IMPORTS ===== #
 
 ## ===== STDLIB ===== ##

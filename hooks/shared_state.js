@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const { execSync } = require('child_process');
 
 // ==== EXCEPTIONS ===== //
@@ -38,13 +39,88 @@ function findProjectRoot() {
 }
 
 const PROJECT_ROOT = findProjectRoot();
-const STATE_FILE = path.join(PROJECT_ROOT, 'sessions', 'sessions-state.json');
-const LOCK_DIR = STATE_FILE.replace('.json', '.lock');
 const CONFIG_FILE = path.join(PROJECT_ROOT, 'sessions', 'sessions-config.json');
 
 // Mode description strings
 const DISCUSSION_MODE_MSG = "You are now in Discussion Mode and should focus on discussing and investigating with the user (no edit-based tools)";
 const ORCHESTRATION_MODE_MSG = "You are now in Orchestration Mode and may use tools to coordinate and delegate work - when you are done return immediately to Discussion Mode";
+
+// ==== HASH FUNCTIONS ===== //
+
+/**
+ * Hash a filesystem path to a 12-character hexadecimal identifier.
+ *
+ * Symlinks are resolved before hashing to ensure symlink and target
+ * produce identical hashes. Falls back to path.resolve() if
+ * fs.realpathSync() fails.
+ *
+ * @param {string} absolutePath - Path to hash
+ * @returns {string} 12-character lowercase hexadecimal string
+ */
+function hashPath(absolutePath) {
+    let normalized;
+    try {
+        // Resolve symlinks and canonicalize path
+        normalized = fs.realpathSync(absolutePath);
+    } catch (err) {
+        // Fallback for non-existent paths: resolve as much as possible
+        // Walk up the path until we find an existing ancestor, then resolve that
+        // and append the non-existent tail. This matches Python's resolve(strict=False)
+        // behavior and ensures symlinks in parent directories are resolved.
+        const parts = path.resolve(absolutePath).split(path.sep);
+        let existing = '';
+        let tail = [];
+
+        // Find the deepest existing ancestor
+        for (let i = parts.length; i > 0; i--) {
+            const candidate = parts.slice(0, i).join(path.sep) || path.sep;
+            try {
+                existing = fs.realpathSync(candidate);
+                tail = parts.slice(i);
+                break;
+            } catch {
+                continue;
+            }
+        }
+
+        // If we found an existing ancestor, append the tail
+        if (existing) {
+            normalized = tail.length > 0 ? path.join(existing, ...tail) : existing;
+        } else {
+            // No existing ancestor found (shouldn't happen on Unix/Windows)
+            normalized = path.resolve(absolutePath);
+        }
+    }
+
+    // Hash the normalized path string
+    const hash = crypto.createHash('md5')
+        .update(normalized)
+        .digest('hex');
+
+    // Return first 12 characters
+    return hash.substring(0, 12);
+}
+
+/**
+ * Get a unique identifier for the current project.
+ *
+ * Returns the hash of PROJECT_ROOT, providing a stable
+ * identifier that's consistent across sessions.
+ *
+ * @returns {string} 12-character hexadecimal project identifier
+ */
+function getProjectIdentifier() {
+    return hashPath(PROJECT_ROOT);
+}
+
+// Compute project identifier at module load time
+const PROJECT_ID = getProjectIdentifier();
+
+// ==== SCOPED PATH CONSTANTS ===== //
+// Scoped state paths: sessions/state/<project_hash>/
+const STATE_DIR = path.join(PROJECT_ROOT, 'sessions', 'state', PROJECT_ID);
+const STATE_FILE = path.join(STATE_DIR, 'sessions-state.json');
+const LOCK_DIR = path.join(STATE_DIR, 'sessions-state.lock');
 
 // ==== ENUMS ===== //
 
@@ -531,6 +607,7 @@ class SessionsFlags {
         this.context_85 = data.context_85 || false;
         this.context_90 = data.context_90 || false;
         this.subagent = data.subagent || false;
+        this.subagent_session_id = data.subagent_session_id || null;
         this.noob = data.noob !== undefined ? data.noob : true;
         this.bypass_mode = data.bypass_mode || false;
     }
@@ -539,7 +616,25 @@ class SessionsFlags {
         this.context_85 = false;
         this.context_90 = false;
         this.subagent = false;
+        this.subagent_session_id = null;
         this.bypass_mode = false;
+    }
+
+    setSubagent(sessionId) {
+        this.subagent = true;
+        this.subagent_session_id = sessionId || null;
+    }
+
+    clearSubagent() {
+        this.subagent = false;
+        this.subagent_session_id = null;
+    }
+
+    isSubagentStale(currentSessionId) {
+        if (!this.subagent) return false;
+        if (!this.subagent_session_id) return true;  // Legacy state without tracking
+        if (!currentSessionId) return true;  // Can't verify, assume stale for safety
+        return this.subagent_session_id !== currentSessionId;
     }
 }
 
@@ -1106,13 +1201,13 @@ function atomicWrite(filePath, obj) {
     }
 }
 
-function acquireLock(timeout = 1.0, pollMs = 50, staleTimeout = 30.0) {
-    const lockInfoFile = path.join(LOCK_DIR, 'lock_info.json');
+function acquireLock(timeout = 1.0, pollMs = 50, staleTimeout = 30.0, lockDir = LOCK_DIR) {
+    const lockInfoFile = path.join(lockDir, 'lock_info.json');
     const start = Date.now() / 1000;
 
     while (true) {
         // Check for stale lock first
-        if (fs.existsSync(LOCK_DIR)) {
+        if (fs.existsSync(lockDir)) {
             try {
                 // Try to read lock info
                 if (fs.existsSync(lockInfoFile)) {
@@ -1120,12 +1215,20 @@ function acquireLock(timeout = 1.0, pollMs = 50, staleTimeout = 30.0) {
                     const lockPid = lockInfo.pid;
                     const lockTime = lockInfo.timestamp || 0;
 
+                    // CRITICAL FIX: Detect re-entry (nested lock from same process)
+                    if (lockPid === process.pid) {
+                        throw new Error(
+                            `Lock re-entry detected: Process ${process.pid} already owns lock at ${lockDir}. ` +
+                            'Nested acquireLock() calls are not supported and can cause data corruption.'
+                        );
+                    }
+
                     // Check if lock is stale (older than staleTimeout)
                     const now = Date.now() / 1000;
                     if (now - lockTime > staleTimeout) {
                         console.error(`Removing stale lock (age: ${(now - lockTime).toFixed(1)}s)`);
                         try {
-                            fs.rmSync(LOCK_DIR, { recursive: true, force: true });
+                            fs.rmSync(lockDir, { recursive: true, force: true });
                         } catch {}
                     }
                     // Check if owning process is dead (same machine only)
@@ -1137,17 +1240,21 @@ function acquireLock(timeout = 1.0, pollMs = 50, staleTimeout = 30.0) {
                             // Process doesn't exist, remove stale lock
                             console.error(`Removing lock from dead process ${lockPid}`);
                             try {
-                                fs.rmSync(LOCK_DIR, { recursive: true, force: true });
+                                fs.rmSync(lockDir, { recursive: true, force: true });
                             } catch {}
                         }
                     }
                 }
-            } catch {
+            } catch (err) {
+                // Re-throw re-entry errors immediately
+                if (err.message && err.message.includes('Lock re-entry detected')) {
+                    throw err;
+                }
                 // Malformed lock info, try to remove after timeout
                 if ((Date.now() / 1000) - start > timeout) {
                     console.error('Removing malformed lock');
                     try {
-                        fs.rmSync(LOCK_DIR, { recursive: true, force: true });
+                        fs.rmSync(lockDir, { recursive: true, force: true });
                     } catch {}
                 }
             }
@@ -1155,7 +1262,12 @@ function acquireLock(timeout = 1.0, pollMs = 50, staleTimeout = 30.0) {
 
         // Try to acquire lock
         try {
-            fs.mkdirSync(LOCK_DIR, { recursive: false }); // atomic lock acquire
+            // Ensure parent directory exists before creating lock
+            const parentDir = path.dirname(lockDir);
+            if (!fs.existsSync(parentDir)) {
+                fs.mkdirSync(parentDir, { recursive: true });
+            }
+            fs.mkdirSync(lockDir, { recursive: false }); // atomic lock acquire
             // Write lock info atomically
             const lockInfo = {
                 pid: process.pid,
@@ -1164,43 +1276,110 @@ function acquireLock(timeout = 1.0, pollMs = 50, staleTimeout = 30.0) {
             };
             fs.writeFileSync(lockInfoFile, JSON.stringify(lockInfo), 'utf-8');
             return true;
-        } catch {
+        } catch (err) {
+            // Only retry on lock contention (EEXIST), bubble up other errors
+            if (err.code !== 'EEXIST') {
+                throw err;  // Permission denied, disk full, etc. - fail fast
+            }
             if ((Date.now() / 1000) - start > timeout) {
-                // Force-remove stale lock after timeout and try once more
-                console.error(`Force-removing lock after ${timeout}s timeout`);
-                try {
-                    fs.rmSync(LOCK_DIR, { recursive: true, force: true });
-                } catch {}
-                // Try once more to acquire
-                try {
-                    fs.mkdirSync(LOCK_DIR, { recursive: false });
-                    const lockInfo = {
-                        pid: process.pid,
-                        timestamp: Date.now() / 1000,
-                        host: os.hostname()
-                    };
-                    fs.writeFileSync(lockInfoFile, JSON.stringify(lockInfo), 'utf-8');
-                    return true;
-                } catch {
-                    // Someone else grabbed it in the meantime
-                    throw new Error(`Could not acquire lock ${LOCK_DIR} even after force removal`);
-                }
+                // Timeout expired - could not acquire lock
+                throw new Error(
+                    `Could not acquire lock ${lockDir} within ${timeout}s timeout. ` +
+                    'Lock may be held by another process or stale.'
+                );
             }
             sleepSync(pollMs);
         }
     }
 }
 
-function releaseLock() {
+function releaseLock(lockDir = LOCK_DIR) {
     try {
-        fs.rmSync(LOCK_DIR, { recursive: true, force: true });
+        fs.rmSync(lockDir, { recursive: true, force: true });
     } catch {
         // Ignore errors
     }
 }
 
+// ==== LEGACY MIGRATION ===== //
+/**
+ * Migrate legacy state from sessions/sessions-state.json to scoped location.
+ *
+ * This function is called on first state load. It checks for legacy state at
+ * PROJECT_ROOT/sessions/sessions-state.json and migrates it to the scoped
+ * location at sessions/state/<project_hash>/sessions-state.json.
+ *
+ * Migration behavior:
+ * - Skip if legacy file doesn't exist
+ * - Skip if new scoped state already exists
+ * - Acquire legacy lock before moving
+ * - Use atomic rename (not copy+delete)
+ * - Remove legacy lock after migration
+ * - Log migration to stderr
+ */
+function migrateLegacyStateIfNeeded() {
+    const legacyStateFile = path.join(PROJECT_ROOT, 'sessions', 'sessions-state.json');
+    const legacyLockDir = path.join(PROJECT_ROOT, 'sessions', 'sessions-state.lock');
+
+    // Skip if no legacy state exists
+    if (!fs.existsSync(legacyStateFile)) {
+        return;
+    }
+
+    // Skip if new scoped state already exists (already migrated)
+    if (fs.existsSync(STATE_FILE)) {
+        return;
+    }
+
+    console.error(`Migrating state from ${legacyStateFile} to ${STATE_FILE}`);
+
+    // Acquire legacy lock to prevent concurrent access during migration
+    // CRITICAL: Use same lock acquisition logic as acquireLock() to handle
+    // stale locks and retry properly - DO NOT just skip migration on EEXIST
+    try {
+        acquireLock(5.0, 50, 30.0, legacyLockDir);  // Use legacy lock path
+    } catch (err) {
+        // Could not acquire lock - either held by another process or stale
+        // Re-throw to prevent creating blank scoped state
+        console.error(`Cannot acquire legacy lock for migration: ${err.message}`);
+        throw new Error(`Legacy state migration blocked: ${err.message}`);
+    }
+
+    try {
+        // Double-check target doesn't exist (race condition check)
+        if (fs.existsSync(STATE_FILE)) {
+            console.error('State already migrated by another process');
+            return;
+        }
+
+        // Ensure target directory exists
+        fs.mkdirSync(STATE_DIR, { recursive: true });
+
+        // Atomic rename from legacy to scoped location
+        fs.renameSync(legacyStateFile, STATE_FILE);
+        console.error('Migration complete');
+    } catch (err) {
+        if (err.code === 'EEXIST') {
+            // Target was created between checks - migration already done
+            console.error('State already migrated by another process');
+        } else if (err.code === 'ENOENT') {
+            // Source was removed between checks - migration already done
+            console.error('Legacy state already migrated');
+        } else {
+            // Unexpected error - re-throw
+            throw err;
+        }
+    } finally {
+        // Release legacy lock
+        releaseLock(legacyLockDir);
+    }
+}
+
 // ==== GEIPI ===== //
 function loadState() {
+    // Check for legacy state migration on first load
+    migrateLegacyStateIfNeeded();
+
     if (!fs.existsSync(STATE_FILE)) {
         const initial = new SessionsState();
         atomicWrite(STATE_FILE, initial.toDict());
@@ -1509,11 +1688,13 @@ function listOpenTasks() {
 module.exports = {
     // Constants
     PROJECT_ROOT,
+    STATE_DIR,
     STATE_FILE,
     LOCK_DIR,
     CONFIG_FILE,
     DISCUSSION_MODE_MSG,
     ORCHESTRATION_MODE_MSG,
+    PROJECT_ID,
 
     // Enums
     TriggerCategory,
@@ -1561,5 +1742,7 @@ module.exports = {
     isDirectoryTask,
     getTaskFilePath,
     isSubtask,
-    isParentTask
+    isParentTask,
+    hashPath,
+    getProjectIdentifier
 };

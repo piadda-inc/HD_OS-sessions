@@ -1021,7 +1021,27 @@ if (isCIEnvironment()) {
 
 //!> Task orchestration gate
 if (toolName === "Task" && !STATE.flags?.bypass_mode) {
+    // Self-healing: Clear stale subagent flag
+    // Case 1: Flag from a different session (session ID mismatch or missing)
+    // Case 2: Flag from same session but orchestrator mode (crashed subagent in same session)
+    // The orchestrator should never be blocked by its own stale flag - only actual
+    // subagent processes (which run in separate contexts) should be blocked.
+    const isStaleFromDifferentSession = STATE.flags.isSubagentStale(sessionId);
+    const isStaleFromSameSession = STATE.flags.subagent &&
+                                   STATE.mode !== Mode.NO &&  // In orchestration mode
+                                   STATE.flags.subagent_session_id === sessionId;
+
+    if (isStaleFromDifferentSession || isStaleFromSameSession) {
+        editState(s => {
+            s.flags.clearSubagent();
+        });
+        // Reload state after clearing
+        const freshState = loadState();
+        Object.assign(STATE.flags, freshState.flags);
+    }
+
     // CRITICAL: Block nested subagents
+    // After self-healing, if flag is still set, we're in an actual subagent context
     if (STATE.flags.subagent) {
         console.error("[Task Gate] Subagents cannot spawn nested subagents.\n" +
                       "Only the orchestrator can dispatch Task tools.\n" +

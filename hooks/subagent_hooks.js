@@ -209,6 +209,81 @@ function emitPlanSignal(payload, context) {
     }
 }
 
+function triggerReasoningExtraction(taskId, trajectory, exitCode, config) {
+    /**
+     * Fire-and-forget reasoning extraction from subagent trajectory.
+     *
+     * Extracts reasoning memories and stores them in Graphiti via the
+     * reasoning_bank operations. Non-blocking to avoid slowing down hook.
+     *
+     * @param {string} taskId - Task identifier
+     * @param {string} trajectory - Subagent output/transcript
+     * @param {number} exitCode - Exit code (0 = success, non-zero = failure)
+     * @param {object} config - Sessions configuration with reasoning_bank settings
+     */
+    try {
+        // Check if auto_extract is enabled
+        const reasoning_bank = config?.reasoning_bank;
+        if (!reasoning_bank || !reasoning_bank.enabled || !reasoning_bank.auto_extract) {
+            return;
+        }
+
+        // Skip short trajectories (< 500 chars provides little value)
+        if (!trajectory || trajectory.length < 500) {
+            return;
+        }
+
+        // Determine outcome based on exit code
+        const outcome = exitCode === 0 ? "success" : "failure";
+        const groupId = reasoning_bank.group_id || "hd_os_workspace";
+
+        // Fire-and-forget extraction via Python script
+        // Don't wait for completion - this runs asynchronously
+        const extractArgs = [
+            "-m",
+            "reasoning_bank.cli",
+            "extract",
+            "--task-id",
+            taskId,
+            "--outcome",
+            outcome,
+            "--group-id",
+            groupId,
+            "--trajectory-stdin"
+        ];
+
+        const { spawn } = require('child_process');
+        const extractProc = spawn(PYTHON_BIN, extractArgs, {
+            cwd: PROJECT_ROOT,
+            stdio: ['pipe', 'ignore', 'pipe'],  // stdin=pipe, stdout=ignore, stderr=pipe
+            detached: true,
+            timeout: 30000  // 30 second max (generous for LLM extraction)
+        });
+
+        // Send trajectory via stdin
+        if (extractProc.stdin) {
+            extractProc.stdin.write(trajectory);
+            extractProc.stdin.end();
+        }
+
+        // Log errors but don't block
+        extractProc.stderr.on('data', (data) => {
+            console.error(`[reasoning_bank] Extraction warning: ${data.toString().trim()}`);
+        });
+
+        extractProc.on('error', (error) => {
+            console.error(`[reasoning_bank] Failed to spawn extraction: ${error.message}`);
+        });
+
+        // Unref to prevent blocking hook completion
+        extractProc.unref();
+
+    } catch (error) {
+        // Log but never throw - extraction is best-effort
+        console.error(`[reasoning_bank] Extraction trigger failed: ${error.message}`);
+    }
+}
+
 function handleSubagentStopEvent(inputData, toolName) {
     /**
      * Respond to SubagentStop hooks by updating execution plan state.
@@ -219,6 +294,10 @@ function handleSubagentStopEvent(inputData, toolName) {
     if (toolName !== "Task") {
         return;
     }
+
+    // Load config for reasoning_bank check
+    const { loadConfig } = require('./shared_state.js');
+    const config = loadConfig();
 
     // Check if backlog integration is ready
     try {
@@ -321,6 +400,37 @@ function handleSubagentStopEvent(inputData, toolName) {
     emitPlanSignal(payload, { sessionId, groupId, taskId, subagentType, exitStatus });
     const signal = payload.signal || "none";
     console.error(`[Orchestration] Session ${sessionId} (${groupId}) emitted ${signal}`);
+
+    // Trigger reasoning extraction if enabled
+    // Extract trajectory from tool_response or build from transcript
+    let trajectory = "";
+    if (inputData.tool_response && inputData.tool_response.output) {
+        trajectory = inputData.tool_response.output;
+    } else {
+        // Fallback: extract text content from transcript entries
+        trajectory = transcriptEntries
+            .map(entry => {
+                const msg = entry.message;
+                if (!msg || !msg.content) return "";
+                if (typeof msg.content === "string") return msg.content;
+                if (Array.isArray(msg.content)) {
+                    return msg.content
+                        .filter(block => block.type === "text")
+                        .map(block => block.text || "")
+                        .join("\n");
+                }
+                return "";
+            })
+            .filter(text => text.length > 0)
+            .join("\n\n");
+    }
+
+    // Determine exit code from exit status
+    // "completed" or "success" = 0, anything else = 1
+    const exitCode = (exitStatus === "completed" || exitStatus === "success") ? 0 : 1;
+
+    // Fire-and-forget extraction (non-blocking)
+    triggerReasoningExtraction(taskId, trajectory, exitCode, config);
 }
 
 //-//
@@ -418,9 +528,9 @@ This module handles PreToolUse processing for the Task tool:
 
 // ===== EXECUTION ===== //
 
-//!> Set subagent flag
+//!> Set subagent flag with session tracking
 editState(s => {
-    s.flags.subagent = true;
+    s.flags.setSubagent(sessionId);
 });
 const STATE = loadState();
 //!<

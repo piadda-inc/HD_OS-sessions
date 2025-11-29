@@ -9,7 +9,7 @@ from typing import Optional, List, Dict, Any, Iterator, Literal, Union
 from importlib.metadata import version, PackageNotFoundError
 from dataclasses import dataclass, asdict, field
 from contextlib import contextmanager, suppress
-import json, os, tempfile, shutil, sys
+import json, os, tempfile, shutil, sys, hashlib
 from time import monotonic, sleep
 from pathlib import Path
 from enum import Enum
@@ -33,13 +33,67 @@ def find_project_root() -> Path:
     sys.exit(2)
 
 PROJECT_ROOT = find_project_root()
-STATE_FILE = PROJECT_ROOT / "sessions" / "sessions-state.json"
-LOCK_DIR  = STATE_FILE.with_suffix(".lock")
 CONFIG_FILE = PROJECT_ROOT / "sessions" / "sessions-config.json"
 
 # Mode description strings
 DISCUSSION_MODE_MSG = "You are now in Discussion Mode and should focus on discussing and investigating with the user (no edit-based tools)"
 ORCHESTRATION_MODE_MSG = "You are now in Orchestration Mode and may use tools to coordinate and delegate work - when you are done return immediately to Discussion Mode"
+
+# ===== HASH FUNCTIONS ===== #
+def hash_path(absolute_path: Path) -> str:
+    """
+    Hash a filesystem path to a 12-character hexadecimal identifier.
+
+    Symlinks are resolved before hashing to ensure symlink and target
+    produce identical hashes. Falls back to resolve(strict=False) if
+    the path doesn't exist.
+
+    Args:
+        absolute_path: Path to hash (Path object or string)
+
+    Returns:
+        12-character lowercase hexadecimal string
+    """
+    if not isinstance(absolute_path, Path):
+        absolute_path = Path(absolute_path)
+
+    try:
+        # Resolve symlinks and canonicalize path
+        normalized = absolute_path.resolve(strict=True)
+    except (OSError, RuntimeError):
+        # Fallback for non-existent paths
+        normalized = absolute_path.resolve(strict=False)
+
+    # Hash the normalized path string
+    # Use usedforsecurity=False for FIPS compliance (non-cryptographic use)
+    path_bytes = str(normalized).encode('utf-8')
+    hash_digest = hashlib.md5(path_bytes, usedforsecurity=False).hexdigest()
+
+    # Return first 12 characters
+    return hash_digest[:12]
+
+
+def get_project_identifier() -> str:
+    """
+    Get a unique identifier for the current project.
+
+    Returns the hash of PROJECT_ROOT, providing a stable
+    identifier that's consistent across sessions.
+
+    Returns:
+        12-character hexadecimal project identifier
+    """
+    return hash_path(PROJECT_ROOT)
+
+
+# Compute project identifier at module load time
+PROJECT_ID = get_project_identifier()
+
+# ===== SCOPED PATH CONSTANTS ===== #
+# Scoped state paths: sessions/state/<project_hash>/
+STATE_DIR = PROJECT_ROOT / "sessions" / "state" / PROJECT_ID
+STATE_FILE = STATE_DIR / "sessions-state.json"
+LOCK_DIR = STATE_DIR / "sessions-state.lock"
 #-#
 
 """
@@ -464,6 +518,7 @@ class SessionsFlags:
     context_85: bool = False
     context_90: bool = False
     subagent: bool = False
+    subagent_session_id: Optional[str] = None
     noob: bool = True
     bypass_mode: bool = False
 
@@ -471,7 +526,25 @@ class SessionsFlags:
         self.context_85 = False
         self.context_90 = False
         self.subagent = False
+        self.subagent_session_id = None
         self.bypass_mode = False
+
+    def set_subagent(self, session_id: Optional[str] = None) -> None:
+        self.subagent = True
+        self.subagent_session_id = session_id
+
+    def clear_subagent(self) -> None:
+        self.subagent = False
+        self.subagent_session_id = None
+
+    def is_subagent_stale(self, current_session_id: Optional[str]) -> bool:
+        if not self.subagent:
+            return False
+        if not self.subagent_session_id:
+            return True  # Legacy state without tracking
+        if not current_session_id:
+            return True  # Can't verify, assume stale for safety
+        return self.subagent_session_id != current_session_id
 
 @dataclass
 class SessionsTodos:
@@ -796,17 +869,20 @@ def _the_ol_in_out(path: Path, obj: Dict[str, Any]) -> None:
 def _lock(lock_dir: Path, timeout: float = 1.0, poll: float = 0.05, stale_timeout: float = 30.0) -> Iterator[None]:
     """
     Acquire a directory-based lock with stale lock detection.
-    
+
     Args:
         lock_dir: Directory to use as lock
         timeout: Seconds to wait for lock acquisition
         poll: Seconds between acquisition attempts
         stale_timeout: Seconds after which a lock is considered stale
+
+    Raises:
+        RuntimeError: If attempting to acquire lock already owned by this process (nested lock)
+        TimeoutError: If lock cannot be acquired within timeout
     """
     lock_info_file = lock_dir / "lock_info.json"
     start = monotonic()
-    
-                            # Check if process exists (works on Unix0
+
     while True:
         # Check for stale lock first
         if lock_dir.exists():
@@ -816,7 +892,14 @@ def _lock(lock_dir: Path, timeout: float = 1.0, poll: float = 0.05, stale_timeou
                     lock_info = json.loads(lock_info_file.read_text())
                     lock_pid = lock_info.get("pid")
                     lock_time = lock_info.get("timestamp", 0)
-                    
+
+                    # CRITICAL FIX: Detect re-entry (nested lock from same process)
+                    if lock_pid == os.getpid():
+                        raise RuntimeError(
+                            f"Lock re-entry detected: Process {os.getpid()} already owns lock at {lock_dir}. "
+                            "Nested _lock() calls are not supported and can cause data corruption."
+                        )
+
                     # Check if lock is stale (older than stale_timeout)
                     if monotonic() - lock_time > stale_timeout:
                         print(f"Removing stale lock (age: {monotonic() - lock_time:.1f}s)", file=sys.stderr)
@@ -833,9 +916,11 @@ def _lock(lock_dir: Path, timeout: float = 1.0, poll: float = 0.05, stale_timeou
                 if monotonic() - start > timeout:
                     print(f"Removing malformed lock", file=sys.stderr)
                     with suppress(Exception): shutil.rmtree(lock_dir)
-        
+
         # Try to acquire lock
         try:
+            # Ensure parent directory exists before creating lock
+            lock_dir.parent.mkdir(parents=True, exist_ok=True)
             lock_dir.mkdir(exist_ok=False)  # atomic lock acquire
             # Write lock info atomically
             lock_info = { "pid": os.getpid(),
@@ -845,30 +930,81 @@ def _lock(lock_dir: Path, timeout: float = 1.0, poll: float = 0.05, stale_timeou
             break
         except FileExistsError:
             if monotonic() - start > timeout:
-                # Force-remove stale lock after timeout and try once more
-                print(f"Force-removing lock after {timeout}s timeout", file=sys.stderr)
-                shutil.rmtree(lock_dir, ignore_errors=True)
-                # Try once more to acquire
-                try:
-                    lock_dir.mkdir(exist_ok=False)
-                    # Write lock info atomically
-                    lock_info = { "pid": os.getpid(),
-                        "timestamp": monotonic(),
-                        "host": os.uname().nodename if hasattr(os, 'uname') else "unknown" }
-                    lock_info_file.write_text(json.dumps(lock_info))
-                    break
-                except FileExistsError:
-                    # Someone else grabbed it in the meantime
-                    raise TimeoutError(f"Could not acquire lock {lock_dir} even after force removal")
+                # Timeout expired - could not acquire lock
+                raise TimeoutError(
+                    f"Could not acquire lock {lock_dir} within {timeout}s timeout. "
+                    "Lock may be held by another process or stale."
+                )
             sleep(poll)
-    
+
     try: yield
     finally:
         with suppress(Exception): shutil.rmtree(lock_dir)
 ##-##
 
+## ===== LEGACY MIGRATION ===== ##
+def _migrate_legacy_state_if_needed() -> None:
+    """
+    Migrate legacy state from sessions/sessions-state.json to scoped location.
+
+    This function is called on first state load. It checks for legacy state at
+    PROJECT_ROOT/sessions/sessions-state.json and migrates it to the scoped
+    location at sessions/state/<project_hash>/sessions-state.json.
+
+    Migration behavior:
+    - Skip if legacy file doesn't exist
+    - Skip if new scoped state already exists
+    - Acquire legacy lock before moving
+    - Use atomic rename (not copy+delete)
+    - Remove legacy lock after migration
+    - Log migration to stderr
+    """
+    legacy_state_file = PROJECT_ROOT / "sessions" / "sessions-state.json"
+    legacy_lock_dir = PROJECT_ROOT / "sessions" / "sessions-state.lock"
+
+    # Skip if no legacy state exists
+    if not legacy_state_file.exists():
+        return
+
+    # Skip if new scoped state already exists (already migrated)
+    if STATE_FILE.exists():
+        return
+
+    print(f"Migrating state from {legacy_state_file} to {STATE_FILE}", file=sys.stderr)
+
+    # Acquire legacy lock to prevent concurrent access during migration
+    # CRITICAL: Handle TimeoutError to prevent crashes when lock is held
+    try:
+        with _lock(legacy_lock_dir, timeout=5.0):
+            # Double-check target doesn't exist (race condition check)
+            if STATE_FILE.exists():
+                print("State already migrated by another process", file=sys.stderr)
+                return
+
+            # Ensure target directory exists
+            STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+            # Atomic rename from legacy to scoped location
+            legacy_state_file.rename(STATE_FILE)
+            print("Migration complete", file=sys.stderr)
+    except TimeoutError as err:
+        # Could not acquire legacy lock within timeout
+        # Re-raise to prevent creating blank scoped state
+        print(f"Cannot acquire legacy lock for migration: {err}", file=sys.stderr)
+        raise RuntimeError(f"Legacy state migration blocked: {err}") from err
+    except FileExistsError:
+        # Target was created between checks - migration already done by another process
+        print("State already migrated by another process", file=sys.stderr)
+    except FileNotFoundError:
+        # Source was removed between checks - migration already done by another process
+        print("Legacy state already migrated", file=sys.stderr)
+##-##
+
 ## ===== GEIPI ===== ##
 def load_state() -> SessionsState:
+    # Check for legacy state migration on first load
+    _migrate_legacy_state_if_needed()
+
     if not STATE_FILE.exists():
         initial = SessionsState()
         _the_ol_in_out(STATE_FILE, initial.to_dict())

@@ -141,7 +141,7 @@ if tool_name == "Bash":
 #!> Subagent cleanup
 if tool_name == "Task" and STATE.flags.subagent:
     with edit_state() as s:
-        s.flags.subagent = False
+        s.flags.clear_subagent()
         STATE = s
     # Clean up agent transcript directory
     subagent_type = tool_input.get("subagent_type", "shared")

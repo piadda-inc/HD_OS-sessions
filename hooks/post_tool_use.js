@@ -25,6 +25,7 @@ const {
 } = require('./shared_state.js');
 const { withTiming } = require('./benchmark_utils.js');
 const { getClient } = require('../lib/memory');
+const { renderStatusline } = require('./daemon/statusline_handler.js');
 ///-///
 
 //-//
@@ -204,7 +205,7 @@ async function main() {
         }
 
         editState(s => {
-            s.flags.subagent = false;
+            s.flags.clearSubagent();
         });
         stateCache = null;
         // Clean up agent transcript directory
@@ -238,6 +239,15 @@ async function main() {
                 });
                 stateCache = null;
                 console.error(listOpenTasks());
+
+                // Re-render statusline to show updated mode immediately
+                try {
+                    renderStatusline({ cwd: cwd || '.', model: inputData.model });
+                } catch (err) {
+                    // Statusline render is best-effort, don't break on error
+                    console.error(`[statusline] Failed to re-render: ${err.message}`);
+                }
+
                 return 0;
             }
 
@@ -273,6 +283,15 @@ async function main() {
                 });
                 stateCache = null;
                 console.error("You have returned to discussion mode. You may now discuss next steps with the user.\n\n");
+
+                // Re-render statusline to show updated mode immediately
+                try {
+                    renderStatusline({ cwd: cwd || '.', model: inputData.model });
+                } catch (err) {
+                    // Statusline render is best-effort, don't break on error
+                    console.error(`[statusline] Failed to re-render: ${err.message}`);
+                }
+
                 mod = true;
             }
         }
