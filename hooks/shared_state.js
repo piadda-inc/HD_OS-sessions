@@ -24,18 +24,34 @@ class StashOccupiedError extends Error {
 // ==== GLOBALS ===== //
 
 function findProjectRoot() {
+    let root;
     if (process.env.CLAUDE_PROJECT_DIR) {
-        return process.env.CLAUDE_PROJECT_DIR;
-    }
-    let cur = process.cwd();
-    while (cur !== path.dirname(cur)) {
-        if (fs.existsSync(path.join(cur, '.claude'))) {
-            return cur;
+        root = process.env.CLAUDE_PROJECT_DIR;
+    } else {
+        let cur = process.cwd();
+        while (cur !== path.dirname(cur)) {
+            if (fs.existsSync(path.join(cur, '.claude'))) {
+                root = cur;
+                break;
+            }
+            cur = path.dirname(cur);
         }
-        cur = path.dirname(cur);
+        if (!root) {
+            console.error('Error: Could not find project root (no .claude directory).');
+            process.exit(2);
+        }
     }
-    console.error('Error: Could not find project root (no .claude directory).');
-    process.exit(2);
+    // Normalize path to ensure consistent hashing across execution contexts:
+    // 1. Resolve to absolute path
+    // 2. Resolve symlinks to canonical path
+    // 3. Remove trailing slashes
+    try {
+        root = fs.realpathSync(path.resolve(root));
+    } catch {
+        // If realpath fails (e.g., path doesn't exist), fall back to resolve only
+        root = path.resolve(root);
+    }
+    return root.replace(/\/+$/, '');
 }
 
 const PROJECT_ROOT = findProjectRoot();
