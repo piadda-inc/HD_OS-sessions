@@ -1188,29 +1188,41 @@ if (toolName === "TodoWrite" && !STATE.flags.bypass_mode) {
         const incomingNames = incomingTodos.map(t => t.content || '');
 
         if (JSON.stringify(activeNames) !== JSON.stringify(incomingNames)) {
-            // Todo names changed - safety violation
-            // Prepare detailed diff for Claude before clearing state
-            const originalCount = activeNames.length;
-            const proposedCount = incomingNames.length;
+            // Todo names changed - check if this is a violation
 
-            // Format original todos
-            const originalDisplay = activeNames.map((name, i) => `  ${i+1}. ${name}`).join('\n');
+            // CRITICAL FIX: Only enforce SHAME RITUAL for subagents
+            // The orchestrator (main agent) can propose plan changes directly to the user
+            if (!STATE.flags.subagent) {
+                // Main agent: Stash old todos for reference, allow change to proceed
+                // User will see the change proposal and approve/reject naturally
+                editState(s => {
+                    s.todos.stashActive();  // Move current todos to stashed
+                });
+                // Allow TodoWrite to proceed (don't exit)
+            } else {
+                // Subagent tried to change the agreed plan - this IS a violation
+                // Prepare detailed diff for Claude before clearing state
+                const originalCount = activeNames.length;
+                const proposedCount = incomingNames.length;
 
-            // Format proposed todos
-            const proposedDisplay = incomingNames.map((name, i) => `  ${i+1}. ${name}`).join('\n');
+                // Format original todos
+                const originalDisplay = activeNames.map((name, i) => `  ${i+1}. ${name}`).join('\n');
 
-            // Get user's implementation trigger phrases
-            const triggerPhrases = CONFIG.trigger_phrases.orchestration_mode;
-            const triggerList = triggerPhrases.map(p => `"${p}"`).join(', ');
+                // Format proposed todos
+                const proposedDisplay = incomingNames.map((name, i) => `  ${i+1}. ${name}`).join('\n');
 
-            // Clear todos and revert to discussion mode (preparing for re-approval)
-            editState(s => {
-                s.todos.clearActive();
-                s.mode = Mode.NO;
-            });
+                // Get user's implementation trigger phrases
+                const triggerPhrases = CONFIG.trigger_phrases.orchestration_mode;
+                const triggerList = triggerPhrases.map(p => `"${p}"`).join(', ');
 
-            // Construct message directed at Claude with prescribed format
-            const message = `[DAIC: Todo Change Blocked]
+                // Clear todos and revert to discussion mode (preparing for re-approval)
+                editState(s => {
+                    s.todos.clearActive();
+                    s.mode = Mode.NO;
+                });
+
+                // Construct message directed at Claude with prescribed format
+                const message = `[DAIC: Todo Change Blocked - Subagent Violation]
 
 You attempted to modify the agreed-upon todo list without user approval.
 
@@ -1243,8 +1255,9 @@ Or, feel free to yell at me or redirect me like I'm a 5 year old child.
 
 After the user approves with a trigger phrase, you may re-submit the updated todo list using TodoWrite.`;
 
-            console.error(message);
-            process.exit(2);
+                console.error(message);
+                process.exit(2);
+            }
         }
     }
 

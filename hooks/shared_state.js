@@ -1201,9 +1201,11 @@ function atomicWrite(filePath, obj) {
     }
 }
 
-function acquireLock(timeout = 1.0, pollMs = 50, staleTimeout = 30.0, lockDir = LOCK_DIR) {
+function acquireLock(timeout = 2.0, pollMs = 50, staleTimeout = 30.0, lockDir = LOCK_DIR) {
     const lockInfoFile = path.join(lockDir, 'lock_info.json');
     const start = Date.now() / 1000;
+    let currentPoll = pollMs;
+    const maxPoll = 500;  // Cap backoff at 500ms
 
     while (true) {
         // Check for stale lock first
@@ -1288,7 +1290,11 @@ function acquireLock(timeout = 1.0, pollMs = 50, staleTimeout = 30.0, lockDir = 
                     'Lock may be held by another process or stale.'
                 );
             }
-            sleepSync(pollMs);
+
+            // Exponential backoff with jitter
+            const jitter = Math.floor(Math.random() * currentPoll * 0.5);  // 0-50% jitter
+            sleepSync(currentPoll + jitter);
+            currentPoll = Math.min(Math.floor(currentPoll * 1.5), maxPoll);  // 1.5x growth, cap at 500ms
         }
     }
 }
